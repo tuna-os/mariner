@@ -58,7 +58,7 @@ const SECTIONS: Section[] = [
     ['Go to Previous Tab', '<Primary>Page_Up'],
     ['Go to Next Tab', '<Primary>Page_Down'],
     ['Toggle Split View', 'F3'],
-    ['Focus Other Pane', 'F6'],
+    ['Focus Other Pane', 'F6 <Alt>w'],
     ['Copy to Other Pane', '<Primary><Shift>c'],
     ['Move to Other Pane', '<Primary><Shift>x'],
   ] },

@@ -12,7 +12,7 @@ export const ACCELS: Record<string, string[]> = {
   'win.new-window': ['<ctrl>n'],
   'win.command-palette': ['<ctrl>p'],
   'win.toggle-split': ['F3'],
-  'win.focus-other-pane': ['F6'],
+  'win.focus-other-pane': ['F6', '<alt>w'],
   'win.close-tab': ['<ctrl>w'],
   'win.tab-prev': ['<ctrl>Page_Up'],
   'win.tab-next': ['<ctrl>Page_Down'],

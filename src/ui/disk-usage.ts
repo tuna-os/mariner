@@ -1,75 +1,80 @@
 import Gtk from 'gi:Gtk-4.0'
-import Adw from 'gi:Adw-1'
 import { basename } from 'node:path'
 import { scanTree } from '../core/disk-usage.ts'
 import type { UsageNode } from '../core/disk-usage.ts'
-import { formatBytes } from '../core/format.ts'
 import { SunburstView } from './sunburst.ts'
 
-/* Disk-usage analyzer window: a Baobab-style rings chart of the folder's tree by
+/* Disk-usage chart widget: a Baobab-style rings chart of a folder's tree by
  * size, scanned live (incremental, cancellable). Click a folder wedge to drill
- * in; Back ascends. Local paths only. */
-export function diskUsageDialog(parent: any, startPath: string): void {
-  const win = new Adw.Window({ modal: false })
-  win.setTransientFor(parent)
-  win.setDefaultSize(760, 720)
+ * in; Back ascends. Local paths only. Embedded in the Properties dialog's
+ * "Disk Usage" expander; the scan is deferred until `start()` so opening
+ * Properties stays cheap — the caller triggers it when the section is revealed,
+ * and `cancel()`s it when the dialog closes. */
+export interface UsageChart {
+  widget: any
+  start: () => void
+  cancel: () => void
+}
 
-  const title = new Adw.WindowTitle({ title: '' })
-  const header = new Adw.HeaderBar()
-  header.setTitleWidget(title)
-  const back = new Gtk.Button({ iconName: 'go-previous-symbolic', tooltipText: 'Back', sensitive: false })
-  header.packStart(back)
-  const spinner = new Adw.Spinner({ widthRequest: 16, heightRequest: 16, visible: false })
-  header.packEnd(spinner)
-
+export function createUsageChart(startPath: string): UsageChart {
   const chart = new SunburstView()
+  chart.widget.setVexpand(true)
 
-  /* Bottom status: total size, or the hovered wedge's name + size + share. */
-  const status = new Gtk.Label({ label: '', xalign: 0, ellipsize: 3, marginTop: 6, marginBottom: 6, marginStart: 12, marginEnd: 12, cssClasses: ['dim-label'] })
-  const statusBar = new Gtk.Box()
-  statusBar.append(status)
+  /* Header (Back + the current folder's name) is shown only once the user has
+   * drilled in; at the top level of the scan there is nothing to ascend to and
+   * no folder name to show, so it stays hidden. */
+  const back = new Gtk.Button({ iconName: 'go-previous-symbolic', tooltipText: 'Back' })
+  back.addCssClass('flat')
+  const title = new Gtk.Label({ label: '', xalign: 0, hexpand: true, ellipsize: 3 /* END */ })
+  const header = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL, spacing: 6, visible: false })
+  header.append(back)
+  header.append(title)
 
-  const view = new Adw.ToolbarView()
-  view.addTopBar(header)
-  view.setContent(chart.widget)
-  view.addBottomBar(statusBar)
-  win.setContent(view)
+  const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6 })
+  box.append(header)
+  box.append(chart.widget)
 
-  const history: string[] = []
-  let current = ''
-  let total = 0
-  /* A fresh flag object per scan; setting `.cancelled` stops the previous walk. */
+  /* The tree is scanned exactly once; drilling in / Back just re-roots the view
+   * to another node of that same in-memory tree — no navigation ever re-scans. */
+  const stack: UsageNode[] = []   // ancestors of the node currently shown
+  let current: UsageNode | null = null
+  let started = false
   let flag = { cancelled: true }
 
-  /* The status line always shows the total; per-wedge detail is in the hover
-   * tooltip (like Disk Usage Analyzer). */
-  const showTotal = () => status.setLabel(current ? `${formatBytes(total)} total in ${basename(current) || current}` : '')
+  chart.onActivate = (node: UsageNode) => {
+    if (node.isDir && node.children && node.children.length && node !== current) {
+      stack.push(current!)
+      show(node)
+    }
+  }
+  back.on('clicked', () => { const p = stack.pop(); if (p) show(p) })
 
-  chart.onActivate = (node: UsageNode) => scan(node.path, true)
-  back.on('clicked', () => { const p = history.pop(); if (p !== undefined) scan(p, false) })
-  win.on('close-request', () => { flag.cancelled = true; return false })
+  function show(node: UsageNode): void {
+    current = node
+    const drilled = stack.length > 0
+    header.setVisible(drilled)          // hidden at the top level of the scan
+    if (drilled) title.setLabel(basename(node.path) || node.path)
+    chart.setRoot(node)
+  }
 
-  function scan(path: string, pushHistory: boolean): void {
-    if (pushHistory && current) history.push(current)
-    back.setSensitive(history.length > 0)
+  function scan(): void {
     flag.cancelled = true
     const mine = flag = { cancelled: false }
-    current = path
-    total = 0
-    title.setTitle(basename(path) || path)
-    title.setSubtitle(path)
-    spinner.setVisible(true)
+    stack.length = 0
+    current = null
+    header.setVisible(false)
     chart.setRoot(null)
-    showTotal()
-    scanTree(path, 5, (root, done) => {
+    scanTree(startPath, 5, (root, done) => {
       if (mine.cancelled) return
-      chart.setRoot(root)
-      total = root.bytes
-      showTotal()
-      if (done) spinner.setVisible(false)
+      /* Refresh live only while still viewing the (growing) root; once the user
+       * has drilled in, leave their view untouched. */
+      if (current === null || current === root) { current = root; show(root) }
     }, () => mine.cancelled)
   }
 
-  scan(startPath, false)
-  win.present()
+  return {
+    widget: box,
+    start: () => { if (!started) { started = true; scan() } },
+    cancel: () => { flag.cancelled = true },
+  }
 }

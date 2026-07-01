@@ -196,3 +196,32 @@
   padding: 0;
   margin: 0;
 }
+
+/* ---- Computer view (drives / "This PC") ---- */
+/* Each drive is a flat, full-width row: icon, name, mount point, a disk-usage
+ * bar and a "N free of M" caption. */
+.computer-tile {
+  padding: 10px 12px;
+}
+.computer-tile-name {
+  font-weight: bold;
+}
+.computer-tile-desc {
+  font-size: 0.9em;
+}
+.computer-tile-bar {
+  margin-top: 6px;
+  margin-bottom: 1px;
+}
+.computer-tile-bar trough,
+.computer-tile-bar progress {
+  min-height: 6px;
+  border-radius: 3px;
+}
+/* Nearly-full drives read as a warning. */
+.computer-tile-bar-full progress {
+  background-color: @error_color;
+}
+.computer-tile-usage {
+  font-size: 0.9em;
+}

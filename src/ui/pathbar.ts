@@ -103,7 +103,7 @@ function classify(file: GFile): Crumb {
   if ((scheme === 'network' || scheme === 'network-view') && isSchemeRoot)
     return { type: 'network', name: 'Network', iconName: ICON_REMOTE, gicon: null, isRoot: true }
   if (scheme === 'computer' && isSchemeRoot)
-    return { type: 'computer', name: 'Computer', iconName: null, gicon: null, isRoot: true }
+    return { type: 'computer', name: 'Computer', iconName: 'computer-symbolic', gicon: null, isRoot: true }
   if (scheme === 'burn' && isSchemeRoot)
     return { type: 'burn', name: F.getBasename(file) || 'CD/DVD Creator', iconName: null, gicon: null, isRoot: true }
 

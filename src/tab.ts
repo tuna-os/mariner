@@ -61,6 +61,7 @@ export class Tab {
     pane.onContextMenu = (w, x, y, target) => { this.setActivePane(pane); this.win.showContextMenu(this, w, x, y, target) }
     pane.onDropFiles = (files, targetDir) => { this.setActivePane(pane); this.win.onDropFiles(this, files, targetDir) }
     pane.onPreview = () => { this.setActivePane(pane); this.win.togglePreview(this) }
+    pane.onDriveContextMenu = (file, w, x, y) => { this.setActivePane(pane); this.win.showDriveMenu(file, w, x, y) }
     pane.onFocused = () => this.setActivePane(pane)
     pane.isCutFile = f => this.win._cutUris.has(F.getUri(f))
     pane.onChanged = () => {

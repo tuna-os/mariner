@@ -5,6 +5,7 @@ import {
   displayName, formatType, formatSize, formatBytes, formatModified, isDirectory,
 } from '../core/format.ts'
 import { measureUsage } from '../core/measure.ts'
+import { createUsageChart } from './disk-usage.ts'
 import type { GFile, GFileInfo } from '../core/types.ts'
 
 interface PromptOptions {
@@ -74,10 +75,16 @@ function permString(info: GFileInfo): string {
   return s
 }
 
-export function showProperties(parent: any, info: GFileInfo, file: GFile): void {
+interface PropertiesOptions {
+  /* Open with the "Disk Usage" section already expanded + scanning (the
+   * merged "Analyze Disk Usage" entry point). */
+  expandUsage?: boolean
+}
+
+export function showProperties(parent: any, info: GFileInfo, file: GFile, opts: PropertiesOptions = {}): void {
   const dialog = new Adw.Dialog()
   dialog.setTitle('Properties')
-  dialog.setContentWidth(440)
+  dialog.setContentWidth(560)
 
   const tv = new Adw.ToolbarView()
   tv.addTopBar(new Adw.HeaderBar())
@@ -97,25 +104,51 @@ export function showProperties(parent: any, info: GFileInfo, file: GFile): void 
   row('Modified', formatModified(info))
   row('Permissions', permString(info))
 
-  /* Folders: walk asynchronously for total size + item counts, updating live. */
-  if (isDirectory(info)) {
-    const contents = new Adw.ActionRow({ title: 'Contents', subtitle: 'Calculating…' })
-    contents.addCssClass('property')
-    group.add(contents)
-    const path = F.getPath(file)
-    if (path) {
-      let cancelled = false
-      dialog.on('closed', () => { cancelled = true })
-      measureUsage(path, (u, done) => {
+  page.add(group)
+
+  /* Folders/drives (local paths only): one "Disk Usage" row whose subtitle holds
+   * the size/count summary, an inline "Scan" button, and the sunburst as its
+   * expandable content. Nothing scans on open — pressing Scan (or opening via
+   * "Analyze Disk Usage") walks the tree once, filling both the summary and the
+   * chart; the walk is cancelled when the dialog closes. */
+  const usagePath = isDirectory(info) ? F.getPath(file) : null
+  if (usagePath) {
+    dialog.setContentHeight(640)
+
+    const usageGroup = new Adw.PreferencesGroup()
+    const expander = new Adw.ExpanderRow({ title: 'Disk Usage', subtitle: 'Not scanned' })
+    const chart = createUsageChart(usagePath)
+    chart.widget.setSizeRequest(-1, 360)
+    expander.addRow(chart.widget)
+
+    const scanBtn = new Gtk.Button({ label: 'Scan', valign: Gtk.Align.CENTER })
+    scanBtn.addCssClass('suggested-action')
+    expander.addSuffix(scanBtn)
+
+    usageGroup.add(expander)
+    page.add(usageGroup)
+
+    let cancelled = false
+    dialog.on('closed', () => { cancelled = true; chart.cancel() })
+    let scanned = false
+    const runScan = () => {
+      if (scanned) return
+      scanned = true
+      scanBtn.setSensitive(false)
+      scanBtn.setLabel('Scanning…')
+      expander.setSubtitle('Calculating…')
+      measureUsage(usagePath, (u, done) => {
         const items = `${u.files} file${u.files === 1 ? '' : 's'}, ${u.folders} folder${u.folders === 1 ? '' : 's'}`
-        contents.setSubtitle(`${formatBytes(u.bytes)} — ${items}${done ? '' : '…'}`)
+        expander.setSubtitle(`${formatBytes(u.bytes)} — ${items}${done ? '' : '…'}`)
+        if (done) scanBtn.setLabel('Done')
       }, () => cancelled)
-    } else {
-      contents.setSubtitle('—')
+      chart.start()
+      expander.setExpanded(true)
     }
+    scanBtn.on('clicked', runScan)
+    if (opts.expandUsage) runScan()
   }
 
-  page.add(group)
   tv.setContent(page)
   dialog.setChild(tv)
   dialog.present(parent)

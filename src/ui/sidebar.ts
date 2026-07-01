@@ -1,7 +1,7 @@
 import Gio from 'gi:Gio-2.0'
 import Gtk from 'gi:Gtk-4.0'
 import { F } from '../core/gio.ts'
-import { getPlaces, getBookmarks, getDevices } from '../services/places-service.ts'
+import { getPlaces, getBookmarks, getComputer, getDevices } from '../services/places-service.ts'
 import type { GFile, Place } from '../core/types.ts'
 
 /* Section ids drive the separators between groups: nautilus'
@@ -9,7 +9,8 @@ import type { GFile, Place } from '../core/types.ts'
  * from the previous row's (and no text section headers). */
 const SECTION_DEFAULT = 0
 const SECTION_BOOKMARKS = 1
-const SECTION_MOUNTS = 2
+const SECTION_COMPUTER = 2
+const SECTION_MOUNTS = 3
 
 interface SidebarRow { row: any; uri: string }
 
@@ -99,6 +100,7 @@ export function createSidebar(onNavigate: (file: GFile) => void): Sidebar {
     prevSection = -1
     for (const p of getPlaces()) addRow(p, SECTION_DEFAULT)
     for (const p of getBookmarks()) addRow(p, SECTION_BOOKMARKS)
+    addRow(getComputer(), SECTION_COMPUTER)
     for (const p of getDevices()) addRow(p, SECTION_MOUNTS)
   }
 

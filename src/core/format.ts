@@ -53,5 +53,6 @@ export function locationName(file: GFile): string {
   if (uri.startsWith('trash:')) return 'Trash'
   if (uri.startsWith('recent:')) return 'Recent'
   if (uri.startsWith('network:')) return 'Network'
+  if (uri.startsWith('computer:')) return 'Computer'
   return F.getBasename(file) || uri
 }

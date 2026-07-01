@@ -1,8 +1,12 @@
+import Gtk from 'gi:Gtk-4.0'
 import { FileView } from './ui/file-view.ts'
+import { createComputerView } from './ui/computer.ts'
+import type { ComputerView } from './ui/computer.ts'
 import { DirectoryService } from './services/directory-service.ts'
 import { SearchService } from './services/search-service.ts'
+import { COMPUTER_URI } from './services/places-service.ts'
 import { History } from './core/navigation.ts'
-import { F } from './core/gio.ts'
+import { F, fileForUri } from './core/gio.ts'
 import type { Entry, GFile, GFileInfo, Prefs, ViewConfig, SearchFilter } from './core/types.ts'
 
 /* A single browsing pane: binds a DirectoryService + SearchService to one
@@ -13,6 +17,8 @@ import type { Entry, GFile, GFileInfo, Prefs, ViewConfig, SearchFilter } from '.
 export class Pane {
   prefs: Prefs
   view: FileView
+  computer: ComputerView
+  paneStack: any
   dir: DirectoryService
   search: SearchService
   history: History
@@ -28,6 +34,7 @@ export class Pane {
   onPreview: () => void = () => {}
   onFocused: () => void = () => {}
   onChanged: () => void = () => {}
+  onDriveContextMenu: (file: GFile, widget: any, x: number, y: number) => void = () => {}
   isCutFile: (file: GFile) => boolean = () => false
 
   /* The initial navigation is deferred to `navigate()` so the container can wire
@@ -42,6 +49,16 @@ export class Pane {
     this.view.onFocusIn = () => this.onFocused()
     this.view.isCutFile = f => this.isCutFile(f)
 
+    /* The Computer interface (computer:///) lives alongside the file view in a
+     * stack; navigation swaps between them. Activating a drive tile navigates
+     * this pane into that drive's mount point. */
+    this.computer = createComputerView()
+    this.computer.onActivate = file => this.navigate(file)
+    this.computer.onContextMenu = (file, w, x, y) => this.onDriveContextMenu(file, w, x, y)
+    this.paneStack = new Gtk.Stack()
+    this.paneStack.addNamed(this.view.widget, 'files')
+    this.paneStack.addNamed(this.computer.widget, 'computer')
+
     this.dir = new DirectoryService()
     this.search = new SearchService()
     this.history = new History()
@@ -49,10 +66,17 @@ export class Pane {
     this._wire()
   }
 
-  get widget(): any { return this.view.widget }
+  get widget(): any { return this.paneStack }
   get canGoBack(): boolean { return this.history.canGoBack }
   get canGoForward(): boolean { return this.history.canGoForward }
-  get parent(): GFile | null { return F.getParent(this.location) }
+  get parent(): GFile | null {
+    const p = F.getParent(this.location)
+    if (p) return p
+    /* The Computer view sits above the filesystem root, so Up from "/" lands
+     * there (and enables the Up button at "/"). */
+    if (this.location && F.getPath(this.location) === '/') return fileForUri(COMPUTER_URI)
+    return null
+  }
   get searchActive(): boolean { return !!this.searchQuery || this.searchFilter.category !== 'all' || this.searchFilter.since > 0 }
   get isShowingSearch(): boolean { return this.searching && this.searchActive }
 
@@ -83,27 +107,43 @@ export class Pane {
   }
 
   /* ---- navigation ---- */
+  get isComputer(): boolean { return !!this.location && F.getUri(this.location).startsWith('computer:') }
+
   navigate(file: GFile, push = true): void {
     this._exitSearch()
     if (push && this.location) this.history.visit(this.location)
     this.location = file
-    this.view.prepareForNavigation()
-    this.dir.load(file)
+    this._load(file)
     this.onChanged()
   }
 
   back(): void { this._go(this.history.goBack(this.location)) }
   forward(): void { this._go(this.history.goForward(this.location)) }
   up(): void { const p = this.parent; if (p) this.navigate(p) }
-  reload(): void { this.isShowingSearch ? this._runSearch() : this.dir.load(this.location) }
+  reload(): void {
+    if (this.isComputer) this.computer.refresh()
+    else this.isShowingSearch ? this._runSearch() : this.dir.load(this.location)
+  }
 
   _go(file: GFile | null): void {
     if (!file) return
     this._exitSearch()
     this.location = file
-    this.view.prepareForNavigation()
-    this.dir.load(file)
+    this._load(file)
     this.onChanged()
+  }
+
+  /* Show the location: the Computer interface for computer:///, otherwise load
+   * the directory into the file view. */
+  _load(file: GFile): void {
+    if (F.getUri(file).startsWith('computer:')) {
+      this.computer.refresh()
+      this.paneStack.setVisibleChildName('computer')
+    } else {
+      this.paneStack.setVisibleChildName('files')
+      this.view.prepareForNavigation()
+      this.dir.load(file)
+    }
   }
 
   /* ---- search ---- */

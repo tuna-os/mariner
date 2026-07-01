@@ -5,6 +5,7 @@ import GLib from 'gi:GLib-2.0'
 import Pango from 'gi:Pango-1.0'
 import { F } from '../core/gio.ts'
 import { HOME } from '../core/format.ts'
+import { volumeMonitor } from '../services/volume-monitor.ts'
 import type { GFile } from '../core/types.ts'
 
 /* Breadcrumb path bar — a faithful port of nautilus's NautilusPathBar
@@ -66,9 +67,15 @@ function osName(): string {
   }
 }
 
+/* Uses the cached VolumeMonitor (see volume-monitor.ts) rather than
+ * Gio.VolumeMonitor.get(): classify() runs on the synchronous window-build path,
+ * and the first get() can block for ~25s on a gvfs daemon autostart. Until the
+ * monitor is ready a mount root simply classifies as a normal folder. */
 function mountForRoot(file: GFile): any | null {
+  const mon = volumeMonitor()
+  if (!mon) return null
   try {
-    for (const m of Gio.VolumeMonitor.get().getMounts())
+    for (const m of mon.getMounts())
       if (F.equal(m.getRoot(), file)) return m
   } catch {}
   return null

@@ -1,7 +1,7 @@
-import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
 import { F, fileForPath, fileForUri } from '../core/gio.ts'
 import { HOME } from '../core/format.ts'
+import { volumeMonitor } from './volume-monitor.ts'
 import type { Place } from '../core/types.ts'
 
 /* Virtual location backing the Computer interface (the drives/partitions page).
@@ -52,15 +52,21 @@ export function getBookmarks(): Place[] {
     const uri = sp < 0 ? line : line.slice(0, sp)
     const label = sp < 0 ? '' : line.slice(sp + 1)
     const file = fileForUri(uri)
-    if (!F.queryExists(file, null)) continue
+    /* Only stat local bookmarks. getPath() is null for gvfs/remote URIs
+     * (sftp://, smb://, …); querying those would block on the gvfs daemon, and
+     * we can't cheaply verify remote availability here anyway — keep them and
+     * let the user click through. */
+    if (F.getPath(file) != null && !F.queryExists(file, null)) continue
     out.push({ label: label || F.getBasename(file), icon: 'folder-symbolic', file })
   }
   return out
 }
 
 export function getDevices(): Place[] {
+  const mon = volumeMonitor()
+  if (!mon) return []
   let mounts: any[] = []
-  try { mounts = Gio.VolumeMonitor.get().getMounts() } catch { return [] }
+  try { mounts = mon.getMounts() } catch { return [] }
   return mounts.map((mount: any) => ({
     label: mount.getName(),
     icon: 'drive-harddisk-symbolic',

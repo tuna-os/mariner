@@ -2,6 +2,7 @@ import Gio from 'gi:Gio-2.0'
 import Gtk from 'gi:Gtk-4.0'
 import { F } from '../core/gio.ts'
 import { getPlaces, getBookmarks, getComputer, getDevices } from '../services/places-service.ts'
+import { initVolumeMonitor } from '../services/volume-monitor.ts'
 import type { GFile, Place } from '../core/types.ts'
 
 /* Section ids drive the separators between groups: nautilus'
@@ -38,6 +39,7 @@ export function createSidebar(onNavigate: (file: GFile) => void): Sidebar {
   list.setActivateOnSingleClick(true)
   let rows: SidebarRow[] = []
   let prevSection = -1
+  let activeUri: string | null = null
 
   list.on('row-activated', (...a: any[]) => {
     const row = a[a.length - 1]
@@ -102,16 +104,27 @@ export function createSidebar(onNavigate: (file: GFile) => void): Sidebar {
     for (const p of getBookmarks()) addRow(p, SECTION_BOOKMARKS)
     addRow(getComputer(), SECTION_COMPUTER)
     for (const p of getDevices()) addRow(p, SECTION_MOUNTS)
+    applyActive()
   }
 
-  function setActive(file: GFile): void {
-    const uri = F.getUri(file)
+  function applyActive(): void {
     list.unselectAll()
-    const match = rows.find(r => r.uri === uri)
+    if (activeUri == null) return
+    const match = rows.find(r => r.uri === activeUri)
     if (match) list.selectRow(match.row)
   }
 
+  function setActive(file: GFile): void {
+    activeUri = F.getUri(file)
+    applyActive()
+  }
+
   build()
+  /* Devices (mounted drives) come from the gvfs VolumeMonitor, whose first
+   * access can block on a daemon autostart — so it's loaded off the first-paint
+   * path (getDevices() returns [] until then). Rebuild once it's ready and on
+   * every mount change, so plugging/unplugging a drive updates the sidebar. */
+  initVolumeMonitor(build)
   const scroll = new Gtk.ScrolledWindow({ child: list, vexpand: true, hscrollbarPolicy: Gtk.PolicyType.NEVER })
   return { widget: scroll, setActive, refresh: build }
 }

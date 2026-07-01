@@ -424,8 +424,8 @@ export class AppWindow {
     /* Dual-pane targets (primary when split + selection). The search text carries
      * a "split pane" alias so a query for "split" surfaces them too. */
     if (tab?.isSplit && sel.length) {
-      items.push({ label: 'Copy to Other Pane', group: 'action', search: 'Copy to Other Pane split', icon: 'edit-copy-symbolic', primary: true, run: () => this._activate('copy-to-other-pane') })
-      items.push({ label: 'Move to Other Pane', group: 'action', search: 'Move to Other Pane split', icon: 'go-next-symbolic', primary: true, run: () => this._activate('move-to-other-pane') })
+      items.push({ label: 'Copy to Other Pane', group: 'action', search: 'Copy to Other Pane split', icon: 'edit-copy-symbolic', primary: true, detail: accelHint('win.copy-to-other-pane'), run: () => this._activate('copy-to-other-pane') })
+      items.push({ label: 'Move to Other Pane', group: 'action', search: 'Move to Other Pane split', icon: 'go-next-symbolic', primary: true, detail: accelHint('win.move-to-other-pane'), run: () => this._activate('move-to-other-pane') })
     }
 
     /* Recent folders (primary), most-frecent first, excluding the current one. */

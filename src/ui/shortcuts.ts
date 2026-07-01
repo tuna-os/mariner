@@ -59,6 +59,8 @@ const SECTIONS: Section[] = [
     ['Go to Next Tab', '<Primary>Page_Down'],
     ['Toggle Split View', 'F3'],
     ['Focus Other Pane', 'F6'],
+    ['Copy to Other Pane', '<Primary><Shift>c'],
+    ['Move to Other Pane', '<Primary><Shift>x'],
   ] },
   { title: 'App', items: [
     ['Command Palette', '<Primary>p'],

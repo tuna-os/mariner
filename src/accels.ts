@@ -24,6 +24,8 @@ export const ACCELS: Record<string, string[]> = {
   'win.copy': ['<ctrl>c'],
   'win.cut': ['<ctrl>x'],
   'win.paste': ['<ctrl>v'],
+  'win.copy-to-other-pane': ['<ctrl><shift>c'],
+  'win.move-to-other-pane': ['<ctrl><shift>x'],
   'win.undo': ['<ctrl>z'],
   'win.redo': ['<ctrl><shift>z'],
   'win.open-new-tab': ['<ctrl>Return'],

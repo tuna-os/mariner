@@ -10,6 +10,7 @@ export const ACCELS: Record<string, string[]> = {
   'win.reload': ['<ctrl>r', 'F5'],
   'win.new-tab': ['<ctrl>t'],
   'win.new-window': ['<ctrl>n'],
+  'win.command-palette': ['<ctrl>p'],
   'win.toggle-split': ['F3'],
   'win.focus-other-pane': ['F6'],
   'win.close-tab': ['<ctrl>w'],
@@ -40,4 +41,25 @@ export const ACCELS: Record<string, string[]> = {
   'win.preferences': ['<ctrl>comma'],
   'win.shortcuts': ['<ctrl>question', '<ctrl>slash'],
   'win.quit': ['<ctrl>q'],
+}
+
+/* Human-readable rendering of a GTK accelerator string (e.g. '<ctrl>p' →
+ * 'Ctrl+P', '<alt>Left' → 'Alt+←'), for the command palette's trailing hint. */
+const ACCEL_MODS: Record<string, string> = { ctrl: 'Ctrl', primary: 'Ctrl', shift: 'Shift', alt: 'Alt', super: 'Super', meta: 'Meta' }
+const ACCEL_KEYS: Record<string, string> = {
+  Left: '←', Right: '→', Up: '↑', Down: '↓', Return: 'Enter', space: 'Space',
+  plus: '+', equal: '=', minus: '−', comma: ',', period: '.', question: '?', slash: '/',
+  Page_Up: 'Page Up', Page_Down: 'Page Down', Home: 'Home', Delete: 'Del',
+}
+export function formatAccel(accel: string): string {
+  const mods = [...accel.matchAll(/<([a-z]+)>/gi)].map(m => ACCEL_MODS[m[1].toLowerCase()] ?? m[1])
+  const key = accel.replace(/<[a-z]+>/gi, '')
+  const label = ACCEL_KEYS[key] ?? (key.length === 1 ? key.toUpperCase() : key)
+  return [...mods, label].join('+')
+}
+
+/* First (primary) accelerator for an action, human-readable, or undefined. */
+export function accelHint(actionName: string): string | undefined {
+  const a = ACCELS[actionName]?.[0]
+  return a ? formatAccel(a) : undefined
 }

@@ -65,6 +65,16 @@ export function modifiedUnix(info: GFileInfo): number {
   try { return dt.toUnix() } catch { return 0 }
 }
 
+/* Path with $HOME abbreviated to `~` (for the command palette's folder list);
+ * falls back to the URI for non-local locations (trash:, recent:, mounts). */
+export function tildePath(file: GFile): string {
+  const path = F.getPath(file)
+  if (!path) return F.getUri(file)
+  if (path === HOME) return '~'
+  if (path.startsWith(HOME + '/')) return '~' + path.slice(HOME.length)
+  return path
+}
+
 /* Human label for a location (tab title / window title). */
 export function locationName(file: GFile): string {
   const path = F.getPath(file)

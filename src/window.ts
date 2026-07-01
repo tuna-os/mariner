@@ -6,9 +6,10 @@ import GObject from 'gi:GObject-2.0'
 import Gdk from 'gi:Gdk-4.0'
 
 import { Tab } from './tab.ts'
-import { ACCELS } from './accels.ts'
+import { ACCELS, accelHint } from './accels.ts'
 import { F, fileForPath, fileForUri, ATTRS } from './core/gio.ts'
-import { HOME, locationName, isDirectory, displayName } from './core/format.ts'
+import { HOME, locationName, isDirectory, displayName, tildePath } from './core/format.ts'
+import { recentFolders } from './services/recent-folders.ts'
 import { ClipboardService } from './services/clipboard-service.ts'
 import { FileOperations, uniqueChild } from './services/file-operations.ts'
 import { UndoService } from './services/undo-service.ts'
@@ -28,6 +29,8 @@ import { QuickLook } from './ui/preview.ts'
 import { OperationsQueue } from './ui/operations-queue.ts'
 import { resolveConflicts, partitionConflicts } from './ui/conflict-dialog.ts'
 import { fileClipboardProvider } from './ui/dnd.ts'
+import { CommandPalette } from './ui/command-palette.ts'
+import type { PaletteItem } from './ui/command-palette.ts'
 import type { Prefs, GFile, GFileInfo, Entry, CopyItem, OpError } from './core/types.ts'
 
 const MIN_ZOOM = 32, MAX_ZOOM = 128, ZOOM_STEP = 16, DEFAULT_ZOOM = 64
@@ -53,6 +56,8 @@ export class AppWindow {
   _pasteTarget: GFile | null = null
   _cutUris = new Set<string>()
   _quicklook: QuickLook | null = null
+  _palette: CommandPalette | null = null
+  _actions: Record<string, any> = {}
 
   window!: any
   toastOverlay!: any
@@ -167,6 +172,7 @@ export class AppWindow {
   _appMenu(): any {
     const menu = Gio.Menu.new()
     const s1 = Gio.Menu.new()
+    s1.append('Command Palette', 'win.command-palette')
     s1.append('New Window', 'win.new-window')
     s1.append('New Tab', 'win.new-tab')
     s1.append('Split View', 'win.toggle-split')
@@ -215,12 +221,14 @@ export class AppWindow {
       const a = Gio.SimpleAction.new(name, null)
       a.on('activate', cb)
       this.window.addAction(a)
+      this._actions[name] = a
       return a
     }
     const addToggle = (name: string, initial: boolean, cb: (a: any) => void): any => {
       const a = Gio.SimpleAction.newStateful(name, null, GLib.Variant.newBoolean(initial))
       a.on('change-state', () => cb(a))
       this.window.addAction(a)
+      this._actions[name] = a
       return a
     }
 
@@ -234,6 +242,7 @@ export class AppWindow {
     add('new-window', () => new AppWindow(this.app, this.activeTab?.location ?? fileForPath(HOME)))
     add('toggle-split', () => this.activeTab?.toggleSplit())
     add('focus-other-pane', () => this.activeTab?.focusOtherPane())
+    add('command-palette', () => this._openPalette())
     add('close-tab', () => { if (this.activeTab) this.tabView.closePage(this.activeTab.page) })
     add('tab-prev', () => this.tabView.selectPreviousPage())
     add('tab-next', () => this.tabView.selectNextPage())
@@ -308,6 +317,165 @@ export class AppWindow {
     const path = target && F.getPath(target)
     if (!path) { this.toast('Disk usage is only available for local folders'); return }
     diskUsageDialog(this.window, path)
+  }
+
+  /* ---- Command palette ---- */
+  _activate(name: string): void { this._actions[name]?.activate(null) }
+
+  _openPalette(): void {
+    if (!this._palette) this._palette = new CommandPalette(this.window)
+    this._palette.open(this._paletteItems())
+  }
+
+  /* The inactive pane when split (destination for the dual-pane copy/move). */
+  _otherPane(): any {
+    const tab = this.activeTab
+    if (!tab || !tab.isSplit) return null
+    return tab.panes.find((p: any) => p !== tab.activePane) ?? null
+  }
+
+  /* Copy/move the selection into the other pane's folder (mirrors _paste). */
+  async _copyToOtherPane(move: boolean): Promise<void> {
+    const other = this._otherPane()
+    const files = this._selectedFiles()
+    if (!other?.location || !files.length) return
+    const dest = other.location
+    const plan = await this._resolvePlan(files, dest)
+    if (!plan || !plan.length) return
+    if (move) {
+      const origParent = F.getParent(files[0])
+      let dests = this.fileOps.moveItems(plan)
+      if (origParent) this.undo.push({
+        undo: () => { dests = this.fileOps.move(dests, origParent) },
+        redo: () => { dests = this.fileOps.moveItems(plan) },
+        undoLabel: 'Undo Move', redoLabel: 'Redo Move',
+      })
+    } else {
+      let dests = this.fileOps.copyItems(plan)
+      this.undo.push({
+        undo: () => this.fileOps.trash(dests),
+        redo: () => { dests = this.fileOps.copyItems(plan) },
+        undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
+      })
+    }
+  }
+
+  /* Build the palette's item list for the current context. `primary` items show
+   * on an empty query — the selection's context actions (mirroring the context
+   * menu) + dual-pane targets + recent folders (frecency-ranked). A broader
+   * catalog of global commands is appended for typed queries. Every action runs
+   * through its existing win.* GAction; folders navigate the active pane. */
+  _paletteItems(): PaletteItem[] {
+    const items: PaletteItem[] = []
+    const added = new Set<string>()
+    const act = (label: string, name: string, opts: { icon?: string; primary?: boolean } = {}): void => {
+      if (added.has(name)) return
+      added.add(name)
+      items.push({
+        label, group: 'action', search: label, icon: opts.icon, primary: !!opts.primary,
+        detail: accelHint('win.' + name),
+        run: () => this._activate(name),
+      })
+    }
+
+    const sel = this._selected()
+    const target = sel[0] ?? null
+    const inTrash = this._inTrash()
+    const clipEmpty = this.clipboard.isEmpty
+    const tab = this.activeTab
+
+    /* Context actions (primary) — same branching as buildContextMenu. */
+    if (target && inTrash) {
+      act('Restore From Trash', 'restore', { icon: 'edit-undo-symbolic', primary: true })
+      act('Delete Permanently', 'delete', { icon: 'edit-delete-symbolic', primary: true })
+      act('Properties', 'properties', { icon: 'document-properties-symbolic', primary: true })
+    } else if (target) {
+      const isDir = isDirectory(target.info)
+      const isImage = (target.info.getContentType() || '').startsWith('image/')
+      act('Open', 'open', { icon: 'document-open-symbolic', primary: true })
+      if (isDir) act('Open in New Tab', 'open-new-tab', { icon: 'tab-new-symbolic', primary: true })
+      else act('Open With…', 'open-with', { icon: 'emblem-system-symbolic', primary: true })
+      act('Preview', 'preview', { icon: 'view-reveal-symbolic', primary: true })
+      act('Cut', 'cut', { icon: 'edit-cut-symbolic', primary: true })
+      act('Copy', 'copy', { icon: 'edit-copy-symbolic', primary: true })
+      if (isDir && !clipEmpty) act('Paste Into Folder', 'paste', { icon: 'edit-paste-symbolic', primary: true })
+      act('Rename…', 'rename', { icon: 'document-edit-symbolic', primary: true })
+      act('Create Link', 'create-link', { icon: 'insert-link-symbolic', primary: true })
+      act('Move to Trash', 'trash', { icon: 'user-trash-symbolic', primary: true })
+      act('Delete Permanently', 'delete', { icon: 'edit-delete-symbolic', primary: true })
+      if (isArchive(displayName(target.info))) act('Extract Here', 'extract-here', { icon: 'archive-extract-symbolic', primary: true })
+      act('Compress…', 'compress', { icon: 'package-x-generic-symbolic', primary: true })
+      if (isImage) act('Set as Wallpaper', 'set-wallpaper', { icon: 'preferences-desktop-wallpaper-symbolic', primary: true })
+      if (isDir) act('Analyze Disk Usage', 'disk-usage', { icon: 'drive-harddisk-symbolic', primary: true })
+      act('Properties', 'properties', { icon: 'document-properties-symbolic', primary: true })
+    } else if (inTrash) {
+      act('Empty Trash', 'empty-trash', { icon: 'user-trash-full-symbolic', primary: true })
+      act('Select All', 'select-all', { icon: 'edit-select-all-symbolic', primary: true })
+    } else {
+      act('New Folder…', 'new-folder', { icon: 'folder-new-symbolic', primary: true })
+      if (!clipEmpty) act('Paste', 'paste', { icon: 'edit-paste-symbolic', primary: true })
+      act('Select All', 'select-all', { icon: 'edit-select-all-symbolic', primary: true })
+      act('Open in Terminal', 'open-terminal', { icon: 'utilities-terminal-symbolic', primary: true })
+      act('Analyze Disk Usage', 'disk-usage', { icon: 'drive-harddisk-symbolic', primary: true })
+    }
+
+    /* Dual-pane targets (primary when split + selection). */
+    if (tab?.isSplit && sel.length) {
+      items.push({ label: 'Copy to Other Pane', group: 'action', search: 'Copy to Other Pane', icon: 'edit-copy-symbolic', primary: true, run: () => this._copyToOtherPane(false) })
+      items.push({ label: 'Move to Other Pane', group: 'action', search: 'Move to Other Pane', icon: 'go-next-symbolic', primary: true, run: () => this._copyToOtherPane(true) })
+    }
+
+    /* Recent folders (primary), most-frecent first, excluding the current one. */
+    const curUri = tab?.location ? F.getUri(tab.location) : undefined
+    const recents = recentFolders(curUri)
+    const maxScore = recents[0]?.score || 1
+    for (const r of recents) {
+      const file = fileForUri(r.uri)
+      const label = locationName(file)
+      const detail = tildePath(file)
+      items.push({
+        label, detail, group: 'folder', icon: 'folder-symbolic', primary: true,
+        search: `${label} ${detail}`,
+        frecencyBonus: (r.score / maxScore) * 0.25,
+        run: () => this.navigate(file),
+      })
+    }
+
+    /* Global commands (query-only) — the buried actions a palette surfaces. */
+    act('New Tab', 'new-tab', { icon: 'tab-new-symbolic' })
+    act('New Window', 'new-window', { icon: 'window-new-symbolic' })
+    act('Reload', 'reload', { icon: 'view-refresh-symbolic' })
+    act('Toggle Split View', 'toggle-split', { icon: 'view-dual-symbolic' })
+    if (tab?.isSplit) act('Focus Other Pane', 'focus-other-pane', { icon: 'go-next-symbolic' })
+    act('Search', 'search', { icon: 'system-search-symbolic' })
+    act('Enter Location', 'location', { icon: 'go-jump-symbolic' })
+    act('Go Home', 'go-home', { icon: 'go-home-symbolic' })
+    act('Go Up', 'up', { icon: 'go-up-symbolic' })
+    act('Back', 'back', { icon: 'go-previous-symbolic' })
+    act('Forward', 'forward', { icon: 'go-next-symbolic' })
+    act('Select All', 'select-all', { icon: 'edit-select-all-symbolic' })
+    act('Invert Selection', 'invert-selection', { icon: 'edit-select-all-symbolic' })
+    act('Show Hidden Files', 'show-hidden', { icon: 'view-reveal-symbolic' })
+    act('Sort by Name', 'sort-name', { icon: 'view-sort-ascending-symbolic' })
+    act('Sort by Size', 'sort-size', { icon: 'view-sort-ascending-symbolic' })
+    act('Sort by Type', 'sort-type', { icon: 'view-sort-ascending-symbolic' })
+    act('Sort by Modified', 'sort-modified', { icon: 'view-sort-ascending-symbolic' })
+    act('Reverse Sort Order', 'sort-desc', { icon: 'view-sort-descending-symbolic' })
+    act('List View', 'view-list', { icon: 'view-list-symbolic' })
+    act('Grid View', 'view-grid', { icon: 'view-grid-symbolic' })
+    act('Zoom In', 'zoom-in', { icon: 'zoom-in-symbolic' })
+    act('Zoom Out', 'zoom-out', { icon: 'zoom-out-symbolic' })
+    act('Reset Zoom', 'zoom-reset', { icon: 'zoom-original-symbolic' })
+    act('New Folder…', 'new-folder', { icon: 'folder-new-symbolic' })
+    act('Create Link', 'create-link', { icon: 'insert-link-symbolic' })
+    act('Open in Terminal', 'open-terminal', { icon: 'utilities-terminal-symbolic' })
+    act('Analyze Disk Usage', 'disk-usage', { icon: 'drive-harddisk-symbolic' })
+    if (inTrash) act('Empty Trash', 'empty-trash', { icon: 'user-trash-full-symbolic' })
+    act('Preferences', 'preferences', { icon: 'preferences-system-symbolic' })
+    act('Keyboard Shortcuts', 'shortcuts', { icon: 'preferences-desktop-keyboard-symbolic' })
+    act('About Files', 'about', { icon: 'help-about-symbolic' })
+
+    return items
   }
 
   _inTrash(file: GFile | null = this.activeTab?.location ?? null): boolean {

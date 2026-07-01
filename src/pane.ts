@@ -2,6 +2,7 @@ import { FileView } from './ui/file-view.ts'
 import { DirectoryService } from './services/directory-service.ts'
 import { SearchService } from './services/search-service.ts'
 import { History } from './core/navigation.ts'
+import { recordFolderVisit } from './services/recent-folders.ts'
 import { F } from './core/gio.ts'
 import type { Entry, GFile, GFileInfo, Prefs, ViewConfig, SearchFilter } from './core/types.ts'
 
@@ -87,6 +88,7 @@ export class Pane {
     this._exitSearch()
     if (push && this.location) this.history.visit(this.location)
     this.location = file
+    recordFolderVisit(F.getUri(file))
     this.view.prepareForNavigation()
     this.dir.load(file)
     this.onChanged()
@@ -101,6 +103,7 @@ export class Pane {
     if (!file) return
     this._exitSearch()
     this.location = file
+    recordFolderVisit(F.getUri(file))
     this.view.prepareForNavigation()
     this.dir.load(file)
     this.onChanged()

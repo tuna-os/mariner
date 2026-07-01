@@ -61,6 +61,7 @@ const SECTIONS: Section[] = [
     ['Focus Other Pane', 'F6'],
   ] },
   { title: 'App', items: [
+    ['Command Palette', '<Primary>p'],
     ['Keyboard Shortcuts', '<Primary>question'],
     ['Preferences', '<Primary>comma'],
     ['Quit', '<Primary>q'],

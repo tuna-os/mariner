@@ -196,3 +196,22 @@
   padding: 0;
   margin: 0;
 }
+
+/* Command palette (Ctrl+P). */
+.mariner-command-palette .mariner-command-entry {
+  margin: 8px;
+  min-height: 34px;
+}
+.mariner-command-palette .mariner-command-list {
+  background: none;
+  padding: 0 6px 6px 6px;
+}
+.mariner-command-palette row.mariner-command-row {
+  min-height: 38px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.mariner-command-palette .mariner-command-detail {
+  margin-left: 12px;
+  font-size: 0.9em;
+}

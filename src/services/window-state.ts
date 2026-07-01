@@ -1,7 +1,7 @@
 import GLib from 'gi:GLib-2.0'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 
-const DIR = GLib.getUserConfigDir() + '/nautilus-clone'
+const DIR = GLib.getUserConfigDir() + '/mariner'
 const FILE = DIR + '/state.json'
 
 export interface WindowState { width: number; height: number; maximized: boolean }

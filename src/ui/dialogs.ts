@@ -123,7 +123,7 @@ export function showProperties(parent: any, info: GFileInfo, file: GFile): void 
 
 export function aboutDialog(parent: any): void {
   const about = new Adw.AboutDialog({
-    applicationName: 'Files',
+    applicationName: 'Mariner',
     applicationIcon: 'system-file-manager',
     developerName: 'node-gtk',
     version: '0.0.1',

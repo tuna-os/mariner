@@ -1,55 +1,75 @@
 import { opendir, lstat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
+import type { Dirent } from 'node:fs'
 
-/* One top-level child of a scanned directory, with its total (recursive for
- * directories) size in bytes. */
-export interface UsageNode { name: string; path: string; bytes: number; isDir: boolean }
+/* A node in the disk-usage tree: a file or directory with its total (recursive
+ * for directories) size. `children` is populated only down to the scan depth —
+ * the rings chart shows a bounded number of levels — but `bytes` always reflects
+ * the *full* subtree (deeper contents still count toward the size). */
+export interface UsageNode {
+  name: string
+  path: string
+  bytes: number
+  isDir: boolean
+  children?: UsageNode[]
+}
 
-/* Measure the disk usage of each direct child of `dir`, asynchronously and
- * cancellably (node fs — local paths only). Children are processed one at a
- * time; after each completes, `onProgress` receives the running list sorted
- * largest-first (so the treemap fills in progressively), and once more with
- * done=true when finished. Symlinked directories are counted but not descended
- * (cycle safety), matching the file walker. Hidden entries are included — disk
- * analysis should surface .cache and friends. */
-export function scanChildren(
+const bySizeDesc = (a: UsageNode, b: UsageNode) => b.bytes - a.bytes
+
+/* Scan a directory into a size tree `maxDepth` levels deep (local paths only,
+ * node fs), asynchronously and cancellably. Each direct child is fully measured
+ * before `onProgress` fires with the running root (children sorted largest
+ * first), so the rings fill in wedge by wedge; a final call has done=true.
+ * Symlinked dirs are counted but not descended (cycle safety). Hidden entries
+ * are included — disk analysis should surface .cache and friends. */
+export function scanTree(
   dir: string,
-  onProgress: (nodes: UsageNode[], done: boolean) => void,
+  maxDepth: number,
+  onProgress: (root: UsageNode, done: boolean) => void,
   isCancelled: () => boolean,
 ): void {
+  const root: UsageNode = { name: basename(dir) || dir, path: dir, bytes: 0, isDir: true, children: [] }
   const run = async (): Promise<void> => {
-    let handle
-    try { handle = await opendir(dir) } catch { onProgress([], true); return }
-    const nodes: UsageNode[] = []
-    for await (const entry of handle) {
+    const entries = await readEntries(dir)
+    if (!entries) { onProgress(root, true); return }
+    for (const entry of entries) {
       if (isCancelled()) return
-      const full = join(dir, entry.name)
-      const isDir = entry.isDirectory() && !entry.isSymbolicLink()
-      let bytes = 0
-      if (isDir) bytes = await dirSize(full, isCancelled)
-      else { try { bytes = (await lstat(full)).size } catch { /* vanished */ } }
-      nodes.push({ name: entry.name, path: full, bytes, isDir })
-      nodes.sort((a, b) => b.bytes - a.bytes)
-      onProgress(nodes.slice(), false)
+      const child = await measure(join(dir, entry.name), entry.name, entry, maxDepth - 1, isCancelled)
+      root.children!.push(child)
+      root.bytes += child.bytes
+      root.children!.sort(bySizeDesc)
+      onProgress(root, false)
     }
-    if (!isCancelled()) onProgress(nodes.slice(), true)
+    if (!isCancelled()) onProgress(root, true)
   }
   run()
 }
 
-/* Recursively sum the byte size of a directory subtree. */
-async function dirSize(dir: string, isCancelled: () => boolean): Promise<number> {
-  let total = 0
-  const walk = async (d: string): Promise<void> => {
-    let handle
-    try { handle = await opendir(d) } catch { return }
-    for await (const entry of handle) {
-      if (isCancelled()) return
-      const full = join(d, entry.name)
-      if (entry.isDirectory() && !entry.isSymbolicLink()) await walk(full)
-      else { try { total += (await lstat(full)).size } catch { /* vanished */ } }
-    }
+/* Build one node: recurse for directories (always summing bytes, recording
+ * children only while depth remains). */
+async function measure(path: string, name: string, entry: Dirent, depth: number, isCancelled: () => boolean): Promise<UsageNode> {
+  if (!entry.isDirectory() || entry.isSymbolicLink()) {
+    let bytes = 0
+    try { bytes = (await lstat(path)).size } catch { /* vanished */ }
+    return { name, path, bytes, isDir: false }
   }
-  await walk(dir)
-  return total
+  const node: UsageNode = { name, path, bytes: 0, isDir: true, children: depth > 0 ? [] : undefined }
+  const entries = await readEntries(path)
+  if (entries) for (const e of entries) {
+    if (isCancelled()) break
+    const child = await measure(join(path, e.name), e.name, e, depth - 1, isCancelled)
+    node.bytes += child.bytes
+    node.children?.push(child)
+  }
+  node.children?.sort(bySizeDesc)
+  return node
+}
+
+async function readEntries(dir: string): Promise<Dirent[] | null> {
+  try {
+    const handle = await opendir(dir)
+    const out: Dirent[] = []
+    for await (const entry of handle) out.push(entry)
+    return out
+  } catch { return null }   /* permission denied, vanished, not a dir */
 }

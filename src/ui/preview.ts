@@ -5,10 +5,14 @@ import { displayName } from '../core/format.ts'
 import { renderPreview } from './preview-renderers.ts'
 import type { Entry } from '../core/types.ts'
 
-/* Quick Look: a lazily-built floating window that previews the selected entry
- * and pages through the view's entries with the arrow keys. One instance per
- * AppWindow, reused across invocations (toggle to open/close). Space (from the
- * file view) or Escape/Space (from here) dismiss it — mirroring macOS. */
+/* Quick Look: a floating window that previews the selected entry and pages
+ * through the view's entries with the arrow keys. One instance per AppWindow.
+ *
+ * The window is built ONCE and reused (hidden, not destroyed) — each GtkWindow
+ * owns a GSK/Vulkan renderer, so recreating it per open leaks GPU memory until
+ * the device OOMs. On close the preview widget is dropped (and any media stream
+ * stopped) so its textures / GStreamer pipeline are released between opens.
+ * Space (from the file view) or Escape/Space (here) dismiss it — like macOS. */
 export class QuickLook {
   parent: any
   win: any = null
@@ -17,36 +21,51 @@ export class QuickLook {
   counter: any = null
   entries: Entry[] = []
   index = 0
+  _open = false
   onIndex: (i: number) => void = () => {}
 
   constructor(parent: any) { this.parent = parent }
 
-  get isOpen(): boolean { return this.win !== null }
+  get isOpen(): boolean { return this._open }
 
   toggle(entries: Entry[], index: number, onIndex: (i: number) => void): void {
-    if (this.isOpen) { this.close(); return }
+    if (this._open) { this.close(); return }
     if (!entries.length) return
     this.entries = entries
     this.index = Math.max(0, Math.min(index, entries.length - 1))
     this.onIndex = onIndex
-    this._build()
+    if (!this.win) this._build()
+    this._open = true
     this._show()
     this.win.present()
   }
 
   close(): void {
-    if (!this.win) return
-    const w = this.win
-    this.win = null
-    w.close()
+    if (!this._open) return
+    this._open = false
+    this._clearContent()
+    if (this.win) this.win.setVisible(false)
+  }
+
+  /* Drop the current preview widget so its GPU/media resources are freed;
+   * explicitly stop a Gtk.Video's media stream first (it won't finalize while a
+   * paintable/pipeline is live). */
+  _clearContent(): void {
+    if (!this.contentBin) return
+    const child = this.contentBin.getChild?.()
+    try { if (child?.getMediaStream?.()) child.setMediaStream(null) } catch { /* not a video */ }
+    this.contentBin.setChild(null)
   }
 
   _build(): void {
     this.win = new Adw.Window({ modal: false, resizable: true })
     this.win.setTransientFor(this.parent)
     this.win.setDefaultSize(880, 620)
+    this.win.setHideOnClose(true)
     this.win.addCssClass('quicklook')
-    this.win.on('close-request', () => { this.win = null; return false })
+    /* Reuse the window: intercept the close so GTK hides it instead of destroying
+     * the renderer. */
+    this.win.on('close-request', () => { this.close(); return true })
 
     const header = new Adw.HeaderBar()
     this.titleWidget = new Adw.WindowTitle({ title: '' })
@@ -96,6 +115,7 @@ export class QuickLook {
     const { info, file } = this.entries[this.index]
     this.titleWidget.setTitle(displayName(info))
     this.counter.setLabel(`${this.index + 1} / ${this.entries.length}`)
+    this._clearContent()
     this.contentBin.setChild(renderPreview(info, file))
     this.onIndex(this.index)
   }

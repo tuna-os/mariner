@@ -50,7 +50,8 @@ export class FileView {
   _typeahead = ''
   _typeaheadTimer = 0
   _wantFocus = false
-  _wantScrollTop = false
+  _pinTop = false
+  _restoreScroll = -1
   _pressedOnItem = false
 
   constructor() {
@@ -70,9 +71,9 @@ export class FileView {
     this.columnView.on('activate', (...a: any[]) => this._activate(a[a.length - 1]))
 
     this.gridScroller = scrolled(this.gridView)
-    this.gridScroller.addCssClass('nautilus-grid-view')
+    this.gridScroller.addCssClass('mariner-grid-view')
     this.listScroller = scrolled(this.columnView)
-    this.listScroller.addCssClass('nautilus-list-view')
+    this.listScroller.addCssClass('mariner-list-view')
 
     this.viewStack = new Gtk.Stack()
     this.viewStack.addNamed(this.gridScroller, 'grid')
@@ -118,6 +119,11 @@ export class FileView {
   }
 
   beginLoading(): void {
+    /* A reload that isn't a fresh navigation (FileMonitor refresh, search
+     * re-run) keeps the current scroll offset so streaming results don't make
+     * the view drift; a navigation pins to the top instead (see
+     * prepareForNavigation). Capture the offset before the store is cleared. */
+    this._restoreScroll = this._pinTop ? -1 : this._currentScroll()
     this._loading = true
     this.all = []
     this.store.removeAll()
@@ -136,23 +142,53 @@ export class FileView {
     }
   }
 
-  /* Signal an upcoming directory change: reset scroll to top and move focus into
-   * the view once results appear (so typeahead/selection keys work immediately). */
+  /* Signal an upcoming directory change: pin the view to the top with the first
+   * item as the cursor, and move focus into the view once results appear (so
+   * typeahead/selection keys work immediately). The pin is held for the whole
+   * incremental load — see _applyPending. */
   prepareForNavigation(): void {
     this._wantFocus = true
-    this._wantScrollTop = true
+    this._pinTop = true
   }
 
+  /* Called after every incremental batch (and at finishLoading). Grabs focus
+   * once, then re-asserts the load's target position: entries arrive over many
+   * batches and are sorted-inserted, so without re-asserting, GTK scrolls the
+   * view to follow the cursor as items land above it — leaving a freshly-opened
+   * folder scrolled partway down instead of at its first item. */
   _applyPending(): void {
     if (this.stack.getVisibleChildName() !== 'results') return
-    if (this._wantScrollTop) { this._scrollTop(); this._wantScrollTop = false }
     if (this._wantFocus) { this._focusVisibleView(); this._wantFocus = false }
+    if (this._pinTop) this._pinToTop()
+    else if (this._restoreScroll >= 0) this._scrollTo(this._restoreScroll)
   }
 
-  _scrollTop(): void {
+  /* Scroll to the top and put the cursor on the first item (like nautilus when
+   * you enter a folder). */
+  _pinToTop(): void {
+    if (this.store.getNItems() === 0) return
+    this._scrollItemIntoView(0, Gtk.ListScrollFlags.FOCUS)
+    this._scrollTop()
+  }
+
+  _scrollAdjustment(): any {
     const sw = this.viewStack.getVisibleChildName() === 'list' ? this.listScroller : this.gridScroller
-    const adj = sw?.getVadjustment?.()
-    if (adj) adj.setValue(0)
+    return sw?.getVadjustment?.()
+  }
+
+  _scrollTop(): void { const adj = this._scrollAdjustment(); if (adj) adj.setValue(0) }
+  _currentScroll(): number { const adj = this._scrollAdjustment(); return adj ? adj.getValue() : 0 }
+
+  _scrollTo(value: number): void {
+    const adj = this._scrollAdjustment()
+    if (adj) adj.setValue(Math.max(0, Math.min(value, adj.getUpper() - adj.getPageSize())))
+  }
+
+  /* GridView.scroll_to(pos, flags, scroll); ColumnView.scroll_to(pos, column,
+   * flags, scroll) — different arities, so dispatch on the visible view. */
+  _scrollItemIntoView(pos: number, flags: any): void {
+    if (this.viewStack.getVisibleChildName() === 'list') this.columnView.scrollTo(pos, null, flags, null)
+    else this.gridView.scrollTo(pos, flags, null)
   }
 
   _focusVisibleView(): void {
@@ -164,6 +200,19 @@ export class FileView {
     this._loading = false
     this._emptyKind = emptyKind
     this._settle()
+    /* Re-assert the final position once more after the full model has been laid
+     * out (the adjustment's range isn't final until then), then release the
+     * pins so later user scrolling sticks. */
+    const pinTop = this._pinTop, restore = this._restoreScroll
+    this._pinTop = false
+    this._restoreScroll = -1
+    if (this.store.getNItems() > 0 && (pinTop || restore >= 0)) {
+      GLib.idleAdd(GLib.PRIORITY_DEFAULT_IDLE, () => {
+        if (pinTop) this._pinToTop()
+        else this._scrollTo(restore)
+        return false
+      })
+    }
   }
 
   showError(message: string): void {
@@ -229,8 +278,7 @@ export class FileView {
   selectIndex(i: number): void {
     if (i < 0 || i >= this.store.getNItems()) return
     this.selection.selectItem(i, true)
-    const view = this.viewStack.getVisibleChildName() === 'list' ? this.columnView : this.gridView
-    view.scrollTo(i, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT, null)
+    this._scrollItemIntoView(i, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT)
   }
 
   /* Re-run the cell factories to reflect state that isn't in the model (e.g. the
@@ -356,7 +404,7 @@ export class FileView {
       this._typeahead = this._typeahead.slice(0, -1)
       this._armTypeaheadTimer()
       this._syncTypeaheadBar()
-      if (this._typeahead) this._typeaheadFind(view)
+      if (this._typeahead) this._typeaheadFind()
       return true
     }
 
@@ -368,7 +416,7 @@ export class FileView {
     this._typeahead += s
     this._armTypeaheadTimer()
     this._syncTypeaheadBar()
-    this._typeaheadFind(view)
+    this._typeaheadFind()
     return true
   }
 
@@ -378,7 +426,7 @@ export class FileView {
     else this.floatingBar.hide()
   }
 
-  _typeaheadFind(view: any): void {
+  _typeaheadFind(): void {
     const needle = this._typeahead.toLowerCase()
     const n = this.store.getNItems()
     const scan = (test: (name: string) => boolean): number => {
@@ -391,7 +439,7 @@ export class FileView {
     if (match < 0) match = scan(name => name.includes(needle))
     if (match < 0) return
     this.selection.selectItem(match, true)
-    view.scrollTo(match, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT, null)
+    this._scrollItemIntoView(match, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT)
   }
 
   _armTypeaheadTimer(): void {

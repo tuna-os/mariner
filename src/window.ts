@@ -106,7 +106,7 @@ export class AppWindow {
   /* ---- UI ---- */
   _buildUI(): void {
     this.window = new Adw.ApplicationWindow(this.app)
-    this.window.setTitle('Files')
+    this.window.setTitle('Mariner')
     const st = loadWindowState()
     this.window.setDefaultSize(st.width, st.height)
     if (st.maximized) this.window.maximize()
@@ -120,7 +120,7 @@ export class AppWindow {
     this.sidebar = createSidebar((file: GFile) => this.navigate(file))
     const sidebarView = new Adw.ToolbarView()
     const sidebarHeader = new Adw.HeaderBar()
-    sidebarHeader.setTitleWidget(new Adw.WindowTitle({ title: 'Files' }))
+    sidebarHeader.setTitleWidget(new Adw.WindowTitle({ title: 'Mariner' }))
     sidebarHeader.packEnd(new Gtk.MenuButton({ iconName: 'open-menu-symbolic', tooltipText: 'Main Menu', menuModel: this._appMenu() }))
     sidebarView.addTopBar(sidebarHeader)
     sidebarView.setContent(this.sidebar.widget)
@@ -300,7 +300,7 @@ export class AppWindow {
   }
 
   /* Analyze disk usage of the selected folder (or the current location) as a
-   * treemap. Local paths only. */
+   * rings chart. Local paths only. */
   _diskUsage(): void {
     const sel = this._selected()[0]
     const target = sel && isDirectory(sel.info) ? sel.file : this.activeTab?.location

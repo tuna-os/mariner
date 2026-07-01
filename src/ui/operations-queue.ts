@@ -1,10 +1,10 @@
 import Gtk from 'gi:Gtk-4.0'
-import Adw from 'gi:Adw-1'
 import GLib from 'gi:GLib-2.0'
 import Pango from 'gi:Pango-1.0'
+import { ProgressRing } from './progress-ring.ts'
 import type { OpBegin, OpProgress, OpDone, OpError } from '../core/types.ts'
 
-interface Row { widget: any; bar: any; determinate: boolean }
+interface Row { widget: any; bar: any; determinate: boolean; done: number; total: number }
 
 /* Header button + popover listing the active long file operations, each with a
  * per-op progress bar and (when cancellable) a ✕. Hidden while idle. Fed by any
@@ -16,13 +16,15 @@ export class OperationsQueue {
   _list: any
   _rows = new Map<string, Row>()
   _pulseTimer = 0
+  _ring: ProgressRing
 
   constructor() {
     this._list = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, marginTop: 10, marginBottom: 10, marginStart: 10, marginEnd: 10 })
     this._list.setSizeRequest(320, -1)
     this._popover = new Gtk.Popover({ child: this._list })
     this.button = new Gtk.MenuButton({ popover: this._popover, tooltipText: 'File Operations', visible: false })
-    this.button.setChild(new Adw.Spinner({ widthRequest: 16, heightRequest: 16 }))
+    this._ring = new ProgressRing(16, 2)
+    this.button.setChild(this._ring.widget)
   }
 
   /* Subscribe to an op emitter. `cancel(id)` (optional) enables per-op ✕. */
@@ -48,13 +50,14 @@ export class OperationsQueue {
     box.append(top)
     box.append(bar)
     this._list.append(box)
-    this._rows.set(key, { widget: box, bar, determinate: false })
+    this._rows.set(key, { widget: box, bar, determinate: false, done: 0, total: 0 })
     this._sync()
   }
 
   _progress(key: string, done: number, total: number): void {
     const row = this._rows.get(key)
     if (!row) return
+    row.done = done; row.total = total
     if (total > 0) { row.determinate = true; row.bar.setFraction(Math.min(1, done / total)) }
     this._sync()
   }
@@ -71,11 +74,20 @@ export class OperationsQueue {
     const active = this._rows.size > 0
     this.button.setVisible(active)
     if (!active) { try { this._popover.popdown() } catch {} }
-    /* Pulse any op that has no determinate progress (e.g. archive ops). */
+    /* Drive the header ring: its opaque arc is the aggregate completion across
+     * all ops with a known total (like nautilus). With no determinate total yet
+     * (e.g. archive ops), spin a fixed arc instead. */
+    let done = 0, total = 0
+    for (const r of this._rows.values()) if (r.determinate && r.total > 0) { done += r.done; total += r.total }
+    if (total > 0) this._ring.setProgress(done / total)
+    else this._ring.setSpinning(active)
+    /* Pulse any op that has no determinate progress (e.g. archive ops), and
+     * advance the ring's indeterminate rotation on the same timer. */
     const needPulse = active && [...this._rows.values()].some(r => !r.determinate)
     if (needPulse && !this._pulseTimer) {
       this._pulseTimer = GLib.timeoutAdd(GLib.PRIORITY_DEFAULT, 120, () => {
         for (const r of this._rows.values()) if (!r.determinate) r.bar.pulse()
+        this._ring.tick()
         return true
       })
     } else if (!needPulse && this._pulseTimer) {

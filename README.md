@@ -1,6 +1,6 @@
-# nautilus-clone
+# Mariner
 
-A [GNOME Files](https://gitlab.gnome.org/GNOME/nautilus) (nautilus) clone built
+Mariner is a [GNOME Files](https://gitlab.gnome.org/GNOME/nautilus) clone built
 with [node-gtk](https://github.com/romgrk/node-gtk) in **TypeScript**, GTK4 +
 libadwaita. It drives the same Adw/Gtk widgets nautilus does, so the UI matches
 closely.

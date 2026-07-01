@@ -2,40 +2,40 @@
  * Files as closely as possible. Loaded at application priority by style.ts.
  *
  * Class conventions mirror nautilus so the selectors below are near-verbatim:
- *   .nautilus-grid-view / .nautilus-list-view  on the scroller wrapping a view
- *   .nautilus-view-cell                        on each cell's content box
+ *   .mariner-grid-view / .mariner-list-view  on the scroller wrapping a view
+ *   .mariner-view-cell                        on each cell's content box
  *   .hidden-file                               on cells for hidden/backup files
  */
 
 /* ---- Path bar (breadcrumb) ---- */
 /* Ported near-verbatim from nautilus src/resources/style.css. */
-.nautilus-pathbar {
+.mariner-pathbar {
   background-color: color-mix(in srgb, currentColor 10%, transparent);
   border-radius: 9px;
 }
 
-.nautilus-pathbar > menubutton {
+.mariner-pathbar > menubutton {
   margin: 0px;
 }
 
 /* Fade + hairline at the scroll edges when crumbs overflow. */
-.nautilus-pathbar > scrolledwindow undershoot.left {
+.mariner-pathbar > scrolledwindow undershoot.left {
   background: linear-gradient(to right, var(--headerbar-shade-color) 6px, transparent 24px);
   border-left: solid 1px var(--border-color);
 }
-.nautilus-pathbar > scrolledwindow undershoot.right {
+.mariner-pathbar > scrolledwindow undershoot.right {
   background: linear-gradient(to left, var(--headerbar-shade-color) 6px, transparent 24px);
   border-right: solid 1px var(--border-color);
 }
 /* Match the sidebar's rounded corners on the "start" side. */
-.nautilus-pathbar > scrolledwindow:dir(ltr) undershoot.left {
+.mariner-pathbar > scrolledwindow:dir(ltr) undershoot.left {
   border-radius: 9px 0px 0px 9px;
 }
-.nautilus-pathbar > scrolledwindow:dir(rtl) undershoot.right {
+.mariner-pathbar > scrolledwindow:dir(rtl) undershoot.right {
   border-radius: 0px 9px 9px 0px;
 }
 
-.nautilus-path-button {
+.mariner-path-button {
   margin: 3px;
   min-width: 8px;
   border-radius: 7px;
@@ -43,19 +43,19 @@
   padding-bottom: 0px;
 }
 
-.nautilus-path-button:not(:hover),
-.nautilus-path-button.current-dir {
+.mariner-path-button:not(:hover),
+.mariner-path-button.current-dir {
   background: none;
 }
 
-.nautilus-path-button:not(.current-dir):not(:backdrop):hover label,
-.nautilus-path-button:not(.current-dir):not(:backdrop):hover image {
+.mariner-path-button:not(.current-dir):not(:backdrop):hover label,
+.mariner-path-button:not(.current-dir):not(:backdrop):hover image {
   opacity: 1;
 }
 
 /* nautilus applies PANGO_WEIGHT_BOLD to the crumb label (not the "/" separator,
  * which lives outside the button). */
-.nautilus-path-button label {
+.mariner-path-button label {
   font-weight: bold;
 }
 
@@ -76,29 +76,29 @@
 }
 
 /* ---- Grid view ---- */
-.nautilus-grid-view gridview {
+.mariner-grid-view gridview {
   padding: 18px;
   border-spacing: 6px;
 }
 
-.nautilus-grid-view gridview > child {
+.mariner-grid-view gridview > child {
   padding: 0px;
   border-radius: 12px;
 }
 
-.nautilus-grid-view .nautilus-view-cell {
+.mariner-grid-view .mariner-view-cell {
   padding: 6px;
   border-radius: 12px;
 }
 
 /* ---- List (column) view ---- */
 /* Horizontal padding lives on the columnview so column widths compute right. */
-.nautilus-list-view columnview {
+.mariner-list-view columnview {
   padding-left: 24px;
   padding-right: 24px;
 }
 
-.nautilus-list-view columnview > listview {
+.mariner-list-view columnview > listview {
   padding-top: 16px;
   padding-bottom: 24px;
   border-spacing: 8px;
@@ -108,7 +108,7 @@
   margin-right: -24px;
 }
 
-.nautilus-list-view columnview > listview > row {
+.mariner-list-view columnview > listview > row {
   margin-left: 24px;
   margin-right: 24px;
   border-radius: 9px;
@@ -116,26 +116,26 @@
 
 /* GTK forces padding on the column cell; we put it on the cell box instead so
  * event controllers cover the whole row. */
-.nautilus-list-view columnview > listview > row > cell {
+.mariner-list-view columnview > listview > row > cell {
   padding: 0px;
 }
 
-.nautilus-list-view .nautilus-view-cell {
+.mariner-list-view .mariner-view-cell {
   padding: 6px;
 }
 
 /* ---- Both views ---- */
 /* The content pane already paints the .view background — drop the views' own to
  * avoid overdraw. */
-.nautilus-grid-view gridview,
-.nautilus-list-view columnview {
+.mariner-grid-view gridview,
+.mariner-list-view columnview {
   background: none;
 }
 
 /* nautilus desaturates the selection highlight inside the views to a neutral
  * grey rather than the system accent. */
-.nautilus-grid-view gridview,
-.nautilus-list-view columnview > listview {
+.mariner-grid-view gridview,
+.mariner-list-view columnview > listview {
   --accent-bg-color: #959595;
   --accent-color: oklab(from var(--accent-bg-color) var(--standalone-color-oklab));
 }

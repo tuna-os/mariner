@@ -9,7 +9,7 @@ import { ACCELS } from './accels.ts'
 /* Under node-gtk ESM, app.run() returns immediately; an explicit GLib.MainLoop
  * pumps the GLib loop, and is quit when the last window is removed. */
 const loop = GLib.MainLoop.new(null, false)
-const app = new Adw.Application('com.github.nodegtk.nautilusclone', 0)
+const app = new Adw.Application('com.github.nodegtk.mariner', 0)
 
 app.on('activate', () => {
   loadStyles()

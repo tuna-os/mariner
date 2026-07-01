@@ -46,15 +46,15 @@ function applyThumbnail(image: any, info: GFileInfo): void {
 export function gridFactory(ctx: CellContext): any {
   const factory = new Gtk.SignalListItemFactory()
   factory.on('setup', (item: any) => {
-    /* Spacing/padding come from the .nautilus-view-cell + gridview CSS. */
+    /* Spacing/padding come from the .mariner-view-cell + gridview CSS. */
     const box = new Gtk.Box({
       orientation: Gtk.Orientation.VERTICAL, spacing: 6,
       halign: Gtk.Align.CENTER, valign: Gtk.Align.START,
       widthRequest: 100,
     })
-    box.addCssClass('nautilus-view-cell')
+    box.addCssClass('mariner-view-cell')
     const image = new Gtk.Image({ pixelSize: ctx.iconSize() })
-    image.addCssClass('nautilus-image')
+    image.addCssClass('mariner-image')
     box.append(image)
     box.append(new Gtk.Label({
       ellipsize: Pango.EllipsizeMode.END, wrap: true,
@@ -84,9 +84,9 @@ export function nameCellFactory(ctx: CellContext): any {
   const factory = new Gtk.SignalListItemFactory()
   factory.on('setup', (item: any) => {
     const box = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL, spacing: 8 })
-    box.addCssClass('nautilus-view-cell')
+    box.addCssClass('mariner-view-cell')
     const image = new Gtk.Image({ pixelSize: 16 })
-    image.addCssClass('nautilus-image')
+    image.addCssClass('mariner-image')
     box.append(image)
     box.append(new Gtk.Label({ ellipsize: Pango.EllipsizeMode.END, xalign: 0 }))
     item.setChild(box)

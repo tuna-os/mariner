@@ -33,11 +33,15 @@ export interface Toolbar {
 export function createToolbar({ onNavigate, onOpenTab, onOpenWindow, onProperties, onLocationEntry, onSearchChanged, onSearchFilter, onSearchExit }: ToolbarHandlers): Toolbar {
   const header = new Adw.HeaderBar()
 
-  /* History controls */
+  /* History controls — flat (not raised/linked), matching the search/view
+   * buttons rather than reading as a solid pair. */
   const histBox = new Gtk.Box()
-  histBox.addCssClass('linked')
-  histBox.append(iconButton('go-previous-symbolic', 'Back', 'win.back'))
-  histBox.append(iconButton('go-next-symbolic', 'Forward', 'win.forward'))
+  const backButton = iconButton('go-previous-symbolic', 'Back', 'win.back')
+  const forwardButton = iconButton('go-next-symbolic', 'Forward', 'win.forward')
+  backButton.addCssClass('flat')
+  forwardButton.addCssClass('flat')
+  histBox.append(backButton)
+  histBox.append(forwardButton)
   header.packStart(histBox)
 
   /* Title: pathbar | location-entry | search */
@@ -74,6 +78,18 @@ export function createToolbar({ onNavigate, onOpenTab, onOpenWindow, onPropertie
   titleStack.addNamed(locationBox, 'location')
   titleStack.addNamed(searchBox, 'search')
 
+  /* Losing focus on the location entry reverts to the breadcrumb display
+   * (nautilus's location entry cancels on focus-out). Deferred to idle so it
+   * doesn't reshuffle the stack mid focus-change, and guarded on the entry
+   * still being shown so an Enter-navigation that already switched away — or a
+   * switch to search — isn't clobbered back to the pathbar. */
+  const locationFocus = new Gtk.EventControllerFocus()
+  locationFocus.on('leave', () => GLib.idleAdd(GLib.PRIORITY_DEFAULT_IDLE, () => {
+    if (titleStack.getVisibleChildName() === 'location') showStack('pathbar')
+    return false
+  }))
+  locationEntry.addController(locationFocus)
+
   const searchButton = new Gtk.ToggleButton({ iconName: 'edit-find-symbolic', tooltipText: 'Search Current Folder' })
 
   const viewButton = new Adw.SplitButton({
@@ -83,11 +99,11 @@ export function createToolbar({ onNavigate, onOpenTab, onOpenWindow, onPropertie
 
   /* AdwHeaderBar reserves symmetric space around the (hexpanding) title equal to
    * the wider of the two sides, so any imbalance shows up as a gap on the lighter
-   * side. Balance the sides — search toggle on the start next to history, view
-   * controls on the end next to the window buttons — so the path/search stack
-   * fills the full width edge-to-edge with no gap. */
-  header.packStart(searchButton)
+   * side. Balance the sides — history on the start, search + view controls on the
+   * end (search nearest the pathbar, view next to the window buttons) — so the
+   * path/search stack fills the full width edge-to-edge with no gap. */
   header.packEnd(viewButton)
+  header.packEnd(searchButton)
   header.setTitleWidget(titleStack)
 
   function showStack(name: string): void { titleStack.setVisibleChildName(name) }

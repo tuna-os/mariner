@@ -1,6 +1,6 @@
-# nautilus-clone — handoff
+# Mariner — handoff
 
-A GNOME Files (nautilus) clone in **node-gtk + TypeScript**, GTK4 + libadwaita.
+Mariner — a GNOME Files clone in **node-gtk + TypeScript**, GTK4 + libadwaita.
 This doc is the single source of truth for picking the project up. Read it top to
 bottom before changing code. Companion docs: `README.md` (user-facing),
 `PLAN.md` (original feature plan).
@@ -85,9 +85,10 @@ functional tests):
   collisions → Replace / Skip / Keep Both (+ apply-to-all); a header operations
   button lists each running op with per-op progress + cancel (replaces the single
   bottom bar; archive ops flow through it too).
-- **Disk-usage treemap** (context menu → Analyze Disk Usage): a squarified treemap
-  (`Gtk.DrawingArea` + cairo + PangoCairo) of a folder's children by recursive
-  size, scanned live; click a folder tile to drill in, Back to ascend.
+- **Disk-usage rings chart** (context menu → Analyze Disk Usage): a Baobab-style
+  radial sunburst (`Gtk.DrawingArea` + cairo) of a folder's size tree — centre
+  disc = the folder, each ring out one level, wedges sized by share; hover
+  highlights a wedge + its lineage, click a folder wedge drills in, Back ascends.
 - Accelerators wired in `main.ts` (`ACCELS`); Keyboard Shortcuts window lists them.
 - **Interaction**: the file view grabs focus on load/navigation (so typeahead
   and selection keys work immediately — no click required); scroll resets to top
@@ -111,8 +112,7 @@ src/
     navigation.ts          History (back/forward stacks) — pure
     process-stream.ts      ProcessStream: line-streaming over Gio.Subprocess (opt. cwd)
     measure.ts             async recursive disk-usage walk (node fs) for Properties
-    disk-usage.ts          scanChildren(): each child's recursive size (treemap), pure
-    squarify.ts            squarified treemap layout (Bruls et al.) — pure, no GTK
+    disk-usage.ts          scanTree(): nested size tree to a depth (rings chart), pure
     emitter.ts             re-exports Node EventEmitter (loop-safe, pure JS)
     types.ts               Entry, Place, Prefs, ViewConfig, SortKey, SearchFilter, CopyItem, Op*
   services/                one responsibility each; emit events; GTK-free
@@ -139,10 +139,11 @@ src/
     context-menu.ts        buildContextMenu(): pure Gio.Menu model for the view
     conflict-dialog.ts     partitionConflicts() + resolveConflicts() (Replace/Skip/Keep Both)
     operations-queue.ts    header button + popover: per-op progress + cancel (fileOps/archive)
+    progress-ring.ts       ProgressRing: circular progress paintable (nautilus-style)
     preview.ts             QuickLook: floating preview window, pages the view's entries
     preview-renderers.ts   renderPreview(info,file): image/text/av/metadata widgets
-    treemap.ts             TreemapView: squarified treemap on a DrawingArea (cairo+PangoCairo)
-    disk-usage.ts          diskUsageDialog(): treemap window, live scan, drill-down/back
+    sunburst.ts            SunburstView: Baobab-style radial rings chart (DrawingArea+cairo)
+    disk-usage.ts          diskUsageDialog(): rings window, live scan, drill-down/back
     shortcuts.ts           Adw.ShortcutsDialog (data-driven, mirrors shortcuts-dialog.blp)
     preferences.ts         Adw.PreferencesDialog over prefs (view/sort/hidden)
     batch-rename.ts        multi-select rename (find/replace | numbered) + live preview
@@ -268,8 +269,8 @@ checked-out nautilus source at `../nautilus` as the reference for UI + CSS.
   `.floating-bar` CSS). New `src/ui/floating-bar.ts`; wired in `file-view.ts`.
 - [x] **App stylesheet.** `src/ui/style.ts` loads `src/ui/style.css` (adapted
   from `../nautilus/src/resources/style.css`) at application priority.
-- [x] **Grid/list cell padding.** `.nautilus-grid-view`/`.nautilus-list-view`
-  on the scrollers, `.nautilus-view-cell` on cell boxes — CSS ported near-verbatim
+- [x] **Grid/list cell padding.** `.mariner-grid-view`/`.mariner-list-view`
+  on the scrollers, `.mariner-view-cell` on cell boxes — CSS ported near-verbatim
   from nautilus (grid: 18px pad + 6px spacing + rounded 6px cells; list: 24px
   inset + 8px row spacing + rounded rows; neutral-grey selection; hidden-file
   dimming). `style.css` + `cells.ts` + `file-view.ts`.
@@ -288,7 +289,7 @@ checked-out nautilus source at `../nautilus` as the reference for UI + CSS.
   `Adw.PreferencesDialog` editing view/sort/hidden, writing through the same
   paths as the header actions.
 - [x] **Path bar (location bar)** — `src/ui/pathbar.ts` rewritten as a faithful
-  port of `nautilus-pathbar.c`: a `.linked.nautilus-pathbar` box wrapping a
+  port of `nautilus-pathbar.c`: a `.linked.mariner-pathbar` box wrapping a
   horizontal `Gtk.ScrolledWindow` (EXTERNAL/NEVER, natural-width, auto-scrolls to
   reveal the current folder, vertical wheel → horizontal scroll) of crumb
   buttons, plus a trailing `view-more` menu button. Special roots (filesystem =
@@ -298,7 +299,7 @@ checked-out nautilus source at `../nautilus` as the reference for UI + CSS.
   opens the location entry (`win.location`) on click. Middle-click → new tab,
   Ctrl+click → new window, right-click → `pathbar.*` context menu (Open in New
   Window/Tab, Properties). Middle-ellipsize (7-char floor, 28 for current). CSS
-  ported to `src/ui/style.css` (`.nautilus-pathbar`, `.nautilus-path-button`,
+  ported to `src/ui/style.css` (`.mariner-pathbar`, `.mariner-path-button`,
   `.current-dir`, scroll-edge undershoot fades). Header layout (`toolbar.ts`):
   the path/search stack is the hexpanding title widget and fills the full width.
   AdwHeaderBar reserves symmetric space around the title equal to the wider side,
@@ -461,7 +462,12 @@ Verification harnesses were throwaway `/tmp/h-*.mjs` (per §5).
   `renderPreview(info, file)` per content-type (image→`Gtk.Picture`,
   text/code→async node-read into monospace `TextView` capped at 512 KB,
   audio/video→`Gtk.Video`, else metadata card). Navigates within the entries the
-  view is showing.
+  view is showing. **Gotcha:** the preview window is built **once and reused**
+  (hidden on close, not destroyed) — each GtkWindow owns a GSK/Vulkan renderer,
+  so recreating it per open leaks GPU memory until the device OOMs
+  (`vkAllocateMemory … VK_ERROR_OUT_OF_DEVICE_MEMORY`). On close the preview
+  widget is dropped and any `Gtk.Video` media stream stopped, to release its
+  texture/GStreamer pipeline. Verified over 150 open/close/page cycles.
 - **Ripgrep content search.** `SearchFilter` gains `contents: boolean`.
   `search-filter.ts` popover gets a "File contents" switch. `search-service.ts`:
   when `contents && query`, spawn `rg --files-with-matches --fixed-strings
@@ -481,14 +487,18 @@ Verification harnesses were throwaway `/tmp/h-*.mjs` (per §5).
   `src/ui/operations-queue.ts` = a header `MenuButton` (hidden when idle) whose
   popover lists each active op with a per-op progress bar + cancel ✕, fed by
   `fileOps` + `archive` events; **replaces** the single bottom progress revealer.
-- **Disk treemap.** New `src/core/disk-usage.ts` = `scanChildren(path, onProgress,
-  isCancelled)` → each top-level child with recursive byte size, reported
-  incrementally, cancellable (pure node fs, like `measure.ts`). New
-  `src/ui/treemap.ts` = `TreemapView` (`Gtk.DrawingArea`; **squarified** layout;
-  cairo rects + PangoCairo labels; hover/click hit-tested against stored rects;
-  click a folder tile → drill down). New `src/ui/disk-usage.ts` = an `Adw`
-  dialog hosting it (path/total header, spinner while scanning, Back). Opened via
-  `win.disk-usage` from the folder + background context menus.
+- **Disk-usage rings chart** (Baobab-style; replaced an earlier squarified
+  treemap on request). `src/core/disk-usage.ts` = `scanTree(dir, maxDepth,
+  onProgress, isCancelled)` → a nested `UsageNode` tree (children recorded to
+  `maxDepth`, `bytes` always the full recursive subtree), reported incrementally,
+  cancellable (pure node fs). `src/ui/sunburst.ts` = `SunburstView`
+  (`Gtk.DrawingArea` + cairo): centre disc = the scanned folder; each ring out is
+  one tree level; every node a wedge whose sweep = its share of its parent; hue
+  follows the wedge angle (so a subtree is a colour family) and pales with depth;
+  hover highlights a wedge + its lineage to centre; polar hit-test (radius→ring,
+  angle→wedge); click a folder wedge → drill. `src/ui/disk-usage.ts` hosts it in
+  an `Adw` window (title/total header, spinner, Back + hover status). Opened via
+  `win.disk-usage` from the folder + background context menus. `RINGS = 5`.
 
 ### Scoping / decisions (v1) + follow-ups
 
@@ -497,9 +507,13 @@ Verification harnesses were throwaway `/tmp/h-*.mjs` (per §5).
   not surfaced — "Replace" of a directory is a true replace (delete-then-copy),
   not a merge. System-clipboard paste (`_pasteFromSystem`) stays auto-rename (the
   async clipboard read isn't routed through the dialog).
-- **Treemap** v1 is **single-level** (children of the scanned dir) with
-  click-to-drill; no nested rings. Local paths only (node fs). Redraws on every
-  incremental scan report (fine ≤ few hundred children; throttle if needed).
+- **Disk-usage rings chart** shows `RINGS = 5` levels from the current root
+  (scan depth 5; deeper contents still count toward wedge sizes), click-to-drill
+  + Back. Local paths only (node fs). Wedges below `MIN_SWEEP` are skipped (their
+  angle is preserved as a gap). Redraws on every incremental scan report (fine
+  for typical trees; throttle if a huge dir stutters). cairo toy-text is dead, so
+  the chart carries no per-wedge labels — hover shows name/size/% in the status
+  bar (matches Baobab, which uses a side panel + tooltip).
 - **Preview** renders text/image/av + a metadata fallback; **no** PDF/markdown
   rendering yet (PDF needs Poppler; markdown treated as text). Text is a bounded
   512 KB read.

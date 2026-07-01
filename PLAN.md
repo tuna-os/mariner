@@ -1,4 +1,4 @@
-# Nautilus clone — plan
+# Mariner — plan
 
 GTK4 file manager in node-gtk, UI as close to GNOME Files as possible.
 Closeness is free: we drive the **same** Gtk4 + libadwaita widgets nautilus does.

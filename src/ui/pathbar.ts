@@ -10,7 +10,7 @@ import type { GFile } from '../core/types.ts'
 /* Breadcrumb path bar — a faithful port of nautilus's NautilusPathBar
  * (src/nautilus-pathbar.c). Structure:
  *
- *   Box .linked .nautilus-pathbar
+ *   Box .linked .mariner-pathbar
  *     ScrolledWindow (hpolicy EXTERNAL, vpolicy NEVER, hexpand)
  *       Box buttons_box           <- one container per ancestor crumb
  *     MenuButton .flat            <- "view-more" current-folder menu
@@ -118,7 +118,7 @@ function safeGicon(mount: any): any | null {
 export function createPathBar(handlers: PathBarHandlers): PathBar {
   const box = new Gtk.Box({ valign: Gtk.Align.CENTER })
   box.addCssClass('linked')
-  box.addCssClass('nautilus-pathbar')
+  box.addCssClass('mariner-pathbar')
 
   const scrolled = new Gtk.ScrolledWindow({ hexpand: true })
   /* Scroll horizontally only, no internal scrollbar (nautilus). */
@@ -207,7 +207,7 @@ export function createPathBar(handlers: PathBarHandlers): PathBar {
 
   function makeButton(file: GFile, crumb: Crumb, isCurrent: boolean): any {
     const button = new Gtk.Button({ focusOnClick: false })
-    button.addCssClass('nautilus-path-button')
+    button.addCssClass('mariner-path-button')
 
     const image = new Gtk.Image()
     const label = new Gtk.Label({ singleLineMode: true })

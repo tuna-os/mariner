@@ -59,6 +59,15 @@
   font-weight: bold;
 }
 
+/* The view-more ("…") button lives inside the .linked pathbar box, which gives
+ * it a raised button background; the .flat class alone doesn't override that.
+ * Force its idle background transparent so it shows the pathbar tint, matching
+ * the crumbs above. */
+.mariner-pathbar > menubutton > button:not(:hover):not(:active):not(:checked) {
+  background: none;
+  box-shadow: none;
+}
+
 /* ---- Floating status bar (typeahead indicator / status pill) ---- */
 .floating-bar {
   padding: 3px;
@@ -157,4 +166,33 @@
 }
 .quicklook-content .preview-image {
   margin: 12px;
+}
+
+/* ---- Sidebar (places) ---- */
+/* Section dividers: a non-selectable row holding a plain separator. Strip the
+ * usual navigation-sidebar row chrome so it reads as a hairline between groups,
+ * matching nautilus' list_box_header_func separators (no text section headers). */
+.navigation-sidebar row.sidebar-separator-row {
+  min-height: 0;
+  margin: 0;
+  padding: 4px 0;
+  background: none;
+  box-shadow: none;
+}
+.navigation-sidebar row.sidebar-separator-row:hover,
+.navigation-sidebar row.sidebar-separator-row:selected,
+.navigation-sidebar row.sidebar-separator-row:active {
+  background: none;
+}
+.navigation-sidebar row.sidebar-separator-row separator {
+  margin: 0 6px;
+  min-height: 1px;
+}
+
+/* Eject/unmount button on removable-device rows. */
+.navigation-sidebar .sidebar-button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  margin: 0;
 }

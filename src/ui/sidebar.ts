@@ -4,9 +4,9 @@ import { F } from '../core/gio.ts'
 import { getPlaces, getBookmarks, getDevices } from '../services/places-service.ts'
 import type { GFile, Place } from '../core/types.ts'
 
-/* Section types drive the separators between groups (mirrors nautilus'
- * NautilusSidebarSectionType + list_box_header_func: a separator is inserted
- * whenever a row's section differs from the previous row's — no text headers). */
+/* Section ids drive the separators between groups: nautilus'
+ * list_box_header_func draws a GtkSeparator whenever a row's section differs
+ * from the previous row's (and no text section headers). */
 const SECTION_DEFAULT = 0
 const SECTION_BOOKMARKS = 1
 const SECTION_MOUNTS = 2
@@ -20,28 +20,42 @@ export interface Sidebar {
 }
 
 /* Places sidebar (pure view). onNavigate(file) on row activation.
- * A faithful port of nautilus-sidebar.c: one `.navigation-sidebar` GtkListBox,
- * single-selection, sections separated by GtkSeparators via a header func. */
+ *
+ * A faithful port of nautilus-sidebar.c: a single `.navigation-sidebar`
+ * GtkListBox in single-selection / activate-on-single-click mode, rows built
+ * like nautilus-sidebar-row.blp (start icon, middle-ellipsized label, an eject
+ * button on removable devices), and the Places / Bookmarks / Devices groups
+ * split by separators — nautilus draws these from its list_box_header_func, with
+ * no text section headers.
+ *
+ * The separators are non-selectable separator rows rather than GtkListBoxRow
+ * headers: node-gtk mis-marshals GtkListBox.setHeaderFunc/setHeader, and a
+ * separator row is visually identical and keyboard-skipped. */
 export function createSidebar(onNavigate: (file: GFile) => void): Sidebar {
   const list = new Gtk.ListBox({ selectionMode: Gtk.SelectionMode.SINGLE })
   list.addCssClass('navigation-sidebar')
   list.setActivateOnSingleClick(true)
   let rows: SidebarRow[] = []
+  let prevSection = -1
 
   list.on('row-activated', (...a: any[]) => {
     const row = a[a.length - 1]
     if (row?._file) onNavigate(row._file)
   })
 
-  /* Section of the previous appended row, so a separator can be set on the row
-   * that opens a new section (mirrors nautilus' list_box_header_func, but set
-   * directly at build time — node-gtk mis-marshals GtkListBox.setHeaderFunc). */
-  let prevSection = -1
+  function addSeparator(): void {
+    const sep = new Gtk.ListBoxRow({ selectable: false, activatable: false, focusable: false })
+    sep.addCssClass('sidebar-separator-row')
+    sep.setChild(new Gtk.Separator({ orientation: Gtk.Orientation.HORIZONTAL }))
+    list.append(sep)
+  }
 
   function addRow(place: Place, section: number): void {
+    if (prevSection !== -1 && prevSection !== section) addSeparator()
+    prevSection = section
+
     const row = new Gtk.ListBoxRow({ focusOnClick: false })
     row._file = place.file
-    row._section = section
 
     const b = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL })
     b.append(new Gtk.Image({ iconName: place.icon, marginEnd: 8 }))
@@ -49,7 +63,7 @@ export function createSidebar(onNavigate: (file: GFile) => void): Sidebar {
       label: place.label,
       xalign: 0,
       hexpand: true,
-      ellipsize: 2 /* Pango.EllipsizeMode.MIDDLE */,
+      ellipsize: 2 /* Pango.EllipsizeMode.MIDDLE — matches nautilus-sidebar-row.blp */,
       marginEnd: 2,
     }))
 
@@ -75,9 +89,6 @@ export function createSidebar(onNavigate: (file: GFile) => void): Sidebar {
 
     row.setChild(b)
     list.append(row)
-    if (prevSection !== -1 && prevSection !== section)
-      row.setHeader(new Gtk.Separator({ orientation: Gtk.Orientation.HORIZONTAL }))
-    prevSection = section
     rows.push({ row, uri: F.getUri(place.file) })
   }
 

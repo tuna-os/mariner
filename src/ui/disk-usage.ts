@@ -41,14 +41,10 @@ export function diskUsageDialog(parent: any, startPath: string): void {
   /* A fresh flag object per scan; setting `.cancelled` stops the previous walk. */
   let flag = { cancelled: true }
 
+  /* The status line always shows the total; per-wedge detail is in the hover
+   * tooltip (like Disk Usage Analyzer). */
   const showTotal = () => status.setLabel(current ? `${formatBytes(total)} total in ${basename(current) || current}` : '')
 
-  chart.onHover = (node: UsageNode | null) => {
-    if (node) {
-      const share = total > 0 ? ` · ${Math.round((node.bytes / total) * 100)}%` : ''
-      status.setLabel(`${node.name} — ${formatBytes(node.bytes)}${share}`)
-    } else showTotal()
-  }
   chart.onActivate = (node: UsageNode) => scan(node.path, true)
   back.on('clicked', () => { const p = history.pop(); if (p !== undefined) scan(p, false) })
   win.on('close-request', () => { flag.cancelled = true; return false })

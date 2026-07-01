@@ -1,4 +1,5 @@
 import Gtk from 'gi:Gtk-4.0'
+import Gdk from 'gi:Gdk-4.0'
 import Adw from 'gi:Adw-1'
 import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
@@ -13,6 +14,7 @@ export interface ToolbarHandlers {
   onOpenWindow: (file: GFile) => void
   onProperties: (file: GFile) => void
   onLocationEntry: (text: string) => void
+  onLocationExit: () => void
   onSearchChanged: (text: string) => void
   onSearchFilter: (f: SearchFilter) => void
   onSearchExit: () => void
@@ -26,12 +28,20 @@ export interface Toolbar {
   searchButton: any
   showStack: (name: string) => void
   setViewIcon: (mode: ViewMode) => void
+  packTrailing: (w: any) => void
 }
 
 /* Content-area header bar: history, breadcrumb/location/search stack, view
  * controls, new-folder. Buttons drive win.* actions defined by the window. */
-export function createToolbar({ onNavigate, onOpenTab, onOpenWindow, onProperties, onLocationEntry, onSearchChanged, onSearchFilter, onSearchExit }: ToolbarHandlers): Toolbar {
-  const header = new Adw.HeaderBar()
+export function createToolbar({ onNavigate, onOpenTab, onOpenWindow, onProperties, onLocationEntry, onLocationExit, onSearchChanged, onSearchFilter, onSearchExit }: ToolbarHandlers): Toolbar {
+  /* The whole header is one hexpanding row (assembled as the title widget) so
+   * the pathbar fills all slack between the history group and the window
+   * buttons. AdwHeaderBar's own start/end areas are avoided because a centered
+   * title reserves the *wider* side's width on BOTH sides, stranding a gap on
+   * the lighter side (e.g. history is 2 buttons but `appmenu:close` is only 1);
+   * with nothing packed on either side the reserved margin is zero. The window
+   * buttons are therefore rendered inline via GtkWindowControls instead. */
+  const header = new Adw.HeaderBar({ showStartTitleButtons: false, showEndTitleButtons: false })
 
   /* History controls — flat (not raised/linked), matching the search/view
    * buttons rather than reading as a solid pair. */
@@ -42,13 +52,20 @@ export function createToolbar({ onNavigate, onOpenTab, onOpenWindow, onPropertie
   forwardButton.addCssClass('flat')
   histBox.append(backButton)
   histBox.append(forwardButton)
-  header.packStart(histBox)
 
   /* Title: pathbar | location-entry | search */
   const pathbar = createPathBar({ onNavigate, onOpenTab, onOpenWindow, onProperties })
 
   const locationEntry = new Gtk.Entry({ hexpand: true })
   locationEntry.on('activate', () => onLocationEntry(locationEntry.getText()))
+  /* Escape abandons the entry and hands focus back to the file view; the
+   * focus-out handler below then restores the breadcrumb display. */
+  const locationKey = new Gtk.EventControllerKey()
+  locationKey.on('key-pressed', (...a: any[]) => {
+    if (a[0] === Gdk.KEY_Escape) { onLocationExit(); return true }
+    return false
+  })
+  locationEntry.addController(locationKey)
   const locationBox = new Gtk.Box()
   locationBox.addCssClass('linked')
   locationBox.append(locationEntry)
@@ -97,22 +114,32 @@ export function createToolbar({ onNavigate, onOpenTab, onOpenWindow, onPropertie
   })
   viewButton.setActionName('win.toggle-view')
 
-  /* AdwHeaderBar reserves symmetric space around the (hexpanding) title equal to
-   * the wider of the two sides, so any imbalance shows up as a gap on the lighter
-   * side. Balance the sides — history on the start, search + view controls on the
-   * end (search nearest the pathbar, view next to the window buttons) — so the
-   * path/search stack fills the full width edge-to-edge with no gap. */
-  header.packEnd(viewButton)
-  header.packEnd(searchButton)
-  header.setTitleWidget(titleStack)
+  /* Inline window buttons (close/minimise/maximise per the system decoration
+   * layout) sit at the trailing edge; GtkWindowControls renders nothing for a
+   * side that has no buttons, so this also covers layouts with buttons on the
+   * left. */
+  const windowControls = new Gtk.WindowControls({ side: Gtk.PackType.END })
+
+  /* history | pathbar/location/search (hexpands) | search | view | <trailing> |
+   * window buttons — a plain box, so the pathbar fills the middle with no gap. */
+  const titleBox = new Gtk.Box({ hexpand: true, spacing: 6 })
+  titleBox.append(histBox)
+  titleBox.append(titleStack)
+  titleBox.append(searchButton)
+  titleBox.append(viewButton)
+  titleBox.append(windowControls)
+  header.setTitleWidget(titleBox)
 
   function showStack(name: string): void { titleStack.setVisibleChildName(name) }
   function setViewIcon(mode: ViewMode): void {
     /* Show the icon for the mode you'd switch TO. */
     viewButton.setIconName(mode === 'grid' ? 'view-list-symbolic' : 'view-grid-symbolic')
   }
+  /* Insert a trailing control (e.g. the file-operations button) just left of the
+   * window buttons, replacing what would otherwise be header.packEnd(). */
+  function packTrailing(w: any): void { titleBox.insertChildAfter(w, viewButton) }
 
-  return { header, pathbar, locationEntry, searchEntry, searchButton, showStack, setViewIcon }
+  return { header, pathbar, locationEntry, searchEntry, searchButton, showStack, setViewIcon, packTrailing }
 }
 
 function iconButton(iconName: string, tooltip: string, actionName: string | null): any {

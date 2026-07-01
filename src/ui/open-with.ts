@@ -23,13 +23,18 @@ export function openWithDialog(parent: any, info: GFileInfo, file: GFile): void 
   const page = new Adw.PreferencesPage()
   const group = new Adw.PreferencesGroup()
 
+  // node-gtk doesn't mix the GAppInfo interface methods onto the concrete
+  // GDesktopAppInfo instances these functions return, so call them via the
+  // interface prototype (`app.getDisplayName` etc. are undefined otherwise).
+  const AppInfo: any = Gio.AppInfo.prototype
+
   if (!list.length) group.add(new Adw.ActionRow({ title: 'No applications found' }))
   for (const app of list) {
-    const row = new Adw.ActionRow({ title: app.getDisplayName(), activatable: true })
-    const icon = app.getIcon()
+    const row = new Adw.ActionRow({ title: AppInfo.getDisplayName.call(app), activatable: true })
+    const icon = AppInfo.getIcon.call(app)
     if (icon) { const img = new Gtk.Image(); img.setFromGicon(icon); row.addPrefix(img) }
     row.on('activated', () => {
-      try { app.launchUris([uri], null) } catch { /* launch failed */ }
+      try { AppInfo.launchUris.call(app, [uri], null) } catch { /* launch failed */ }
       dialog.close()
     })
     group.add(row)

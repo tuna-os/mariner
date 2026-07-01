@@ -3,7 +3,7 @@ import Adw from 'gi:Adw-1'
 import Gio from 'gi:Gio-2.0'
 import Gdk from 'gi:Gdk-4.0'
 import GLib from 'gi:GLib-2.0'
-import { FILE_INFO_TYPE } from '../core/gio.ts'
+import { FILE_INFO_TYPE, uriOf } from '../core/gio.ts'
 import { displayName, isDirectory } from '../core/format.ts'
 import { makeComparator } from '../core/comparator.ts'
 import type { Comparator } from '../core/comparator.ts'
@@ -15,6 +15,10 @@ import type { Entry, GFile, GFileInfo, ViewConfig, ViewMode, EmptyKind } from '.
 
 type ActivateHandler = (info: GFileInfo, file: GFile) => void
 type ContextMenuHandler = (widget: any, x: number, y: number, target: Entry | null) => void
+
+/* Only fall back to the loading spinner if a load is slower than this; faster
+ * loads (the common case) swap their results in without ever showing it. */
+const SPINNER_DELAY = 300
 
 /* Presents a stream of {info, file} entries as a grid or list, with explicit
  * loading / empty / error states. Entries arrive incrementally (addEntries) and
@@ -52,6 +56,12 @@ export class FileView {
   _wantFocus = false
   _pinTop = false
   _restoreScroll = -1
+  _pendingReset = false
+  _spinnerTimer = 0
+  _merge = false
+  _seen: Set<string> | null = null
+  _storeKeys: Set<string> | null = null
+  _incoming: Entry[] | null = null
   _pressedOnItem = false
 
   constructor() {
@@ -119,24 +129,143 @@ export class FileView {
   }
 
   beginLoading(): void {
-    /* A reload that isn't a fresh navigation (FileMonitor refresh, search
-     * re-run) keeps the current scroll offset so streaming results don't make
-     * the view drift; a navigation pins to the top instead (see
-     * prepareForNavigation). Capture the offset before the store is cleared. */
+    /* Don't blank the view. Two modes, chosen by whether this is a fresh
+     * navigation (see prepareForNavigation → _pinTop):
+     *  - navigation: keep the old folder shown until the new one's first item
+     *    arrives (see _resetIfPending), then swap in one step;
+     *  - refresh / search re-run: reconcile the visible items in place (see
+     *    _beginMerge) so unchanged rows keep their widgets and selection — no
+     *    flicker when a keystroke yields the same (or similar) results.
+     * The spinner only appears if the load is slower than SPINNER_DELAY with
+     * nothing useful to show (see _armSpinner). A refresh/search keeps its
+     * scroll offset; a navigation pins to the top. */
     this._restoreScroll = this._pinTop ? -1 : this._currentScroll()
     this._loading = true
+    if (this._pinTop) { this._merge = false; this._pendingReset = true }
+    else { this._pendingReset = false; this._beginMerge() }
+    this._armSpinner()
+  }
+
+  /* ---- navigation (reset) ---- */
+
+  /* Clear the previous listing right before the first item of the new one is
+   * shown, so the swap is a single step (old → new) with no intermediate blank.
+   * A no-op after the first call of a load. */
+  _resetIfPending(): void {
+    if (!this._pendingReset) return
+    this._pendingReset = false
     this.all = []
     this.store.removeAll()
-    this.stack.setVisibleChildName('loading')
+  }
+
+  /* ---- refresh / search (in-place merge) ---- */
+
+  /* Snapshot the keys currently in the store; incoming items are then merged
+   * against it (mark-and-sweep) instead of clearing and repopulating. */
+  _beginMerge(): void {
+    this._merge = true
+    this._seen = new Set()
+    this._storeKeys = new Set()
+    this._incoming = []
+    const n = this.store.getNItems()
+    for (let i = 0; i < n; i++) this._storeKeys!.add(this.store.getItem(i)._key)
+  }
+
+  _mergeEntries(pairs: Entry[]): void {
+    for (const { info, file } of pairs) {
+      this._stamp(info, file)
+      this._incoming!.push({ info, file })
+      if (!this.filter(info)) continue
+      this._seen!.add(info._key)
+      /* Already displayed → keep its widget (and selection); don't re-insert. */
+      if (this._storeKeys!.has(info._key)) continue
+      this._insertSorted(info)
+      this._storeKeys!.add(info._key)
+    }
+    if (this._loading && this.store.getNItems() > 0) {
+      this._cancelSpinner()
+      this.stack.setVisibleChildName('results')
+      this._applyPending()
+    }
+  }
+
+  /* Sweep: drop the rows that weren't in the new result set, adopt the new full
+   * dataset, and end the merge. */
+  _endMerge(): void {
+    this._removeWhere(info => !this._seen!.has(info._key))
+    this.all = this._incoming!
+    this._merge = false
+    this._seen = this._storeKeys = this._incoming = null
+  }
+
+  /* Prompt narrowing for name-search-as-you-type: immediately drop visible rows
+   * whose name can't contain `query` (keeping matching rows and their widgets),
+   * so extending the query filters the list at once instead of leaving stale
+   * rows visible until the new search finishes streaming. A wrongly-dropped row
+   * (if display-name ≠ on-disk name) is re-added by the search's merge, so this
+   * can only ever be optimistic — it never loses a real match. */
+  narrowByName(query: string): void {
+    if (!query) return
+    const q = query.toLowerCase()
+    this._removeWhere(info => !displayName(info).toLowerCase().includes(q))
+  }
+
+  /* Remove every row for which `shouldRemove` is true, coalescing contiguous
+   * runs into one splice each (one items-changed) so bulk removals stay cheap. */
+  _removeWhere(shouldRemove: (info: any) => boolean): void {
+    let i = this.store.getNItems() - 1
+    while (i >= 0) {
+      if (!shouldRemove(this.store.getItem(i))) { i--; continue }
+      const hi = i
+      while (i >= 0 && shouldRemove(this.store.getItem(i))) i--
+      this.store.splice(i + 1, hi - i, [])   // remove rows [i+1 .. hi]
+    }
+  }
+
+  /* Show the spinner only if, after the delay, there's still nothing useful on
+   * screen: a navigation whose first item hasn't arrived (the visible items
+   * belong to the folder we're leaving), or an empty view (e.g. a search that
+   * hasn't matched yet). A refresh/search with items already showing keeps
+   * them. */
+  _armSpinner(): void {
+    this._cancelSpinner()
+    this._spinnerTimer = GLib.timeoutAdd(GLib.PRIORITY_DEFAULT, SPINNER_DELAY, () => {
+      this._spinnerTimer = 0
+      if (!this._loading) return false
+      if (this._pinTop) {
+        if (!this._pendingReset) return false
+        this._pendingReset = false
+        this.all = []
+        this.store.removeAll()
+        this.stack.setVisibleChildName('loading')
+      } else if (this.store.getNItems() === 0) {
+        this.stack.setVisibleChildName('loading')
+      }
+      return false
+    })
+  }
+
+  _cancelSpinner(): void {
+    if (this._spinnerTimer) { GLib.sourceRemove(this._spinnerTimer); this._spinnerTimer = 0 }
+  }
+
+  /* Stash the GFile and a stable identity key on the info wrapper (both survive
+   * a round-trip through the GListStore). */
+  _stamp(info: GFileInfo, file: GFile): void {
+    info._file = file
+    info._key = uriOf(file)
   }
 
   addEntries(pairs: Entry[]): void {
+    if (this._merge) { this._mergeEntries(pairs); return }
+    this._resetIfPending()
     for (const { info, file } of pairs) {
-      info._file = file
+      this._stamp(info, file)
       this.all.push({ info, file })
       if (this.filter(info)) this._insertSorted(info)
     }
     if (this._loading && this.store.getNItems() > 0) {
+      this._cancelSpinner()
       this.stack.setVisibleChildName('results')
       this._applyPending()
     }
@@ -198,6 +327,12 @@ export class FileView {
 
   finishLoading(emptyKind: EmptyKind = 'folder'): void {
     this._loading = false
+    this._cancelSpinner()
+    /* Finalise the load: merge → sweep the rows that are gone; reset → if
+     * nothing arrived at all (empty folder / no matches), drop the old listing
+     * now so _settle can show the empty state instead of stale items. */
+    if (this._merge) this._endMerge()
+    else this._resetIfPending()
     this._emptyKind = emptyKind
     this._settle()
     /* Re-assert the final position once more after the full model has been laid
@@ -217,6 +352,12 @@ export class FileView {
 
   showError(message: string): void {
     this._loading = false
+    this._cancelSpinner()
+    this._pendingReset = false
+    this._merge = false
+    this._seen = this._storeKeys = this._incoming = null
+    this.all = []
+    this.store.removeAll()
     this._errorPage.setDescription(message || 'The location could not be read.')
     this.stack.setVisibleChildName('error')
   }

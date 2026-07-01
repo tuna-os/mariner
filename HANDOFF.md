@@ -87,8 +87,9 @@ functional tests):
   bottom bar; archive ops flow through it too).
 - **Disk-usage rings chart** (context menu → Analyze Disk Usage): a Baobab-style
   radial sunburst (`Gtk.DrawingArea` + cairo) of a folder's size tree — centre
-  disc = the folder, each ring out one level, wedges sized by share; hover
-  highlights a wedge + its lineage, click a folder wedge drills in, Back ascends.
+  disc = the folder, each ring out one level, wedges sized by share, coloured with
+  Baobab's own palette; hover highlights a wedge + its lineage and shows a
+  name/size tooltip, big wedges are labelled, click a folder wedge drills in.
 - Accelerators wired in `main.ts` (`ACCELS`); Keyboard Shortcuts window lists them.
 - **Interaction**: the file view grabs focus on load/navigation (so typeahead
   and selection keys work immediately — no click required); scroll resets to top
@@ -307,6 +308,19 @@ checked-out nautilus source at `../nautilus` as the reference for UI + CSS.
   search toggle; end = view controls (next to the window buttons). No "Up" or
   "New Folder" buttons; the crumb context menu still exposes New Folder via
   `win.new-folder`.
+- [x] **Sidebar (places)** — `src/ui/sidebar.ts` rewritten to match
+  `nautilus-sidebar.c` / `nautilus-sidebar-row.blp`: a single
+  `.navigation-sidebar` `Gtk.ListBox` (single-selection, activate-on-single-
+  click), rows built like the blp (start `Image` `margin-end: 8`, a
+  middle-ellipsized hexpanding `Label` `margin-end: 2`, and a `media-eject-
+  symbolic` button on removable devices that can eject/unmount). The Places /
+  Bookmarks / Devices groups are split by **separators, not text headers**
+  (nautilus draws these from `list_box_header_func`); we insert them as
+  non-selectable/-activatable/-focusable separator rows (`.sidebar-separator-row`,
+  keyboard-skipped) because node-gtk mis-marshals `GtkListBox.setHeaderFunc/
+  setHeader`. CSS for the divider + eject button in `src/ui/style.css`.
+  Note: this window emits ~8 harmless `G_IS_OBJECT` node-gtk render-time
+  criticals per GSK snapshot regardless of the sidebar (present on HEAD too).
 
 ## 6. Next points (P2/P3)
 
@@ -493,12 +507,20 @@ Verification harnesses were throwaway `/tmp/h-*.mjs` (per §5).
   `maxDepth`, `bytes` always the full recursive subtree), reported incrementally,
   cancellable (pure node fs). `src/ui/sunburst.ts` = `SunburstView`
   (`Gtk.DrawingArea` + cairo): centre disc = the scanned folder; each ring out is
-  one tree level; every node a wedge whose sweep = its share of its parent; hue
-  follows the wedge angle (so a subtree is a colour family) and pales with depth;
-  hover highlights a wedge + its lineage to centre; polar hit-test (radius→ring,
-  angle→wedge); click a folder wedge → drill. `src/ui/disk-usage.ts` hosts it in
-  an `Adw` window (title/total header, spinner, Back + hover status). Opened via
-  `win.disk-usage` from the folder + background context menus. `RINGS = 5`.
+  one tree level; every node a wedge whose sweep = its share of its parent.
+  **Colours match Baobab exactly** (`wedgeColour`, ported from
+  `baobab-chart.vala get_item_color`): the 6-colour GNOME palette
+  (`#e01b24 #ff7800 #f6d32d #33d17a #3584e4 #9141ac`) interpolated by the wedge's
+  angular start (`rel` 0..100, spread over thirds — so the ring runs red→orange→
+  yellow→green), darkened by depth (`intensity = 1 − (depth−1)·0.3/RINGS`); the
+  hovered wedge + its lineage to centre are normalised to full brightness. Hover
+  also raises a **name/size/% tooltip** (`has-tooltip` + `query-tooltip`, Pango
+  markup). Names are drawn tangentially (rotated to the ring, flipped upright) via
+  PangoCairo, but only on wedges the full name fits — so only the big ones get
+  labelled, like Baobab; polar hit-test (radius→ring, angle→wedge); click a folder
+  wedge → drill. `src/ui/disk-usage.ts` hosts it in an `Adw` window (title/total
+  header, spinner, Back + hover status). Opened via `win.disk-usage` from the
+  folder + background context menus. `RINGS = 5` (= Baobab `MAX_DEPTH`).
 
 ### Scoping / decisions (v1) + follow-ups
 
@@ -511,9 +533,9 @@ Verification harnesses were throwaway `/tmp/h-*.mjs` (per §5).
   (scan depth 5; deeper contents still count toward wedge sizes), click-to-drill
   + Back. Local paths only (node fs). Wedges below `MIN_SWEEP` are skipped (their
   angle is preserved as a gap). Redraws on every incremental scan report (fine
-  for typical trees; throttle if a huge dir stutters). cairo toy-text is dead, so
-  the chart carries no per-wedge labels — hover shows name/size/% in the status
-  bar (matches Baobab, which uses a side panel + tooltip).
+  for typical trees; throttle if a huge dir stutters). Per-wedge names are drawn
+  with PangoCairo (cairo toy-text is dead) only when the whole name fits the
+  wedge; hover also shows name/size/% in the status bar.
 - **Preview** renders text/image/av + a metadata fallback; **no** PDF/markdown
   rendering yet (PDF needs Poppler; markdown treated as text). Text is a bounded
   512 KB read.

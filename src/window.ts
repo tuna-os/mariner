@@ -133,11 +133,12 @@ export class AppWindow {
       onOpenWindow: (file: GFile) => new AppWindow(this.app, file),
       onProperties: (file: GFile) => this._propertiesFor(file),
       onLocationEntry: (text: string) => this.openPath(text),
+      onLocationExit: () => { this.toolbar.showStack('pathbar'); this.activeTab?.view.widget.grabFocus() },
       onSearchChanged: (text: string) => this.activeTab?.setSearchQuery(text),
       onSearchFilter: (f) => this.activeTab?.setSearchFilter(f),
       onSearchExit: () => { if (this.searching) this._setSearch(false) },
     })
-    this.toolbar.header.packEnd(this.opsQueue.button)
+    this.toolbar.packTrailing(this.opsQueue.button)
     this.tabView = new Adw.TabView()
     this.tabView.on('notify::selected-page', () => this._onTabSwitched())
     this.tabView.on('close-page', (...a: any[]) => this._onClosePage(a[a.length - 1]))

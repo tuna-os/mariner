@@ -117,6 +117,11 @@ export class Pane {
   _runSearch(): void {
     if (this.searchActive) {
       this.dir.cancel()
+      /* Prune non-matching rows immediately so name-search-as-you-type narrows
+       * at once; the search then reconciles (adds deeper matches, drops any
+       * over-kept rows) without flicker. Content matches can't be predicted
+       * from names, so that mode keeps the plain merge. */
+      if (this.searchQuery && !this.searchFilter.contents) this.view.narrowByName(this.searchQuery)
       this.search.search(this.location, this.searchQuery, { showHidden: this.prefs.showHidden, filter: this.searchFilter })
     } else {
       this.search.cancel()

@@ -1,10 +1,22 @@
 import Gtk from 'gi:Gtk-4.0'
+import Pango from 'gi:Pango-1.0'
+import PangoCairo from 'gi:PangoCairo-1.0'
+import { formatBytes } from '../core/format.ts'
 import type { UsageNode } from '../core/disk-usage.ts'
 
 const TAU = Math.PI * 2
 const TOP = -Math.PI / 2          // 12 o'clock; wedges sweep clockwise from here
-const RINGS = 5                    // rings drawn outward from the centre disc
+const RINGS = 5                    // rings drawn outward (= Baobab MAX_DEPTH)
 const MIN_SWEEP = 0.012            // skip slivers smaller than this (radians)
+
+/* GNOME Disk Usage Analyzer's exact chart palette (baobab-chart.vala
+ * `chart_colors`), interpolated by a wedge's angular position and darkened with
+ * depth — see `wedgeColour`. */
+const PALETTE: Array<[number, number, number]> = [
+  [0xe0, 0x1b, 0x24], [0xff, 0x78, 0x00], [0xf6, 0xd3, 0x2d],
+  [0x33, 0xd1, 0x7a], [0x35, 0x84, 0xe4], [0x91, 0x41, 0xac],
+].map(([r, g, b]) => [r / 255, g / 255, b / 255])
+const COLOR_SEG = 100 / 3          // Baobab spreads the palette over three thirds
 
 interface Segment {
   node: UsageNode
@@ -12,15 +24,15 @@ interface Segment {
   a0: number; a1: number           // angular span (radians)
   inner: number; outer: number     // radii
   parent: number                   // index of the segment one ring in, or -1
-  hue: number
+  rel: number                      // start position around the circle, 0..100
 }
 
 /* A Baobab-style rings chart (GNOME Disk Usage Analyzer): the scanned folder is
  * the centre disc; each ring out is one level of the tree, every node a wedge
- * sized by its share of its parent. Colour follows the wedge's angle (so a
- * subtree forms a hue family) and pales with depth. Hovering highlights a wedge
- * and its lineage to the centre; clicking a folder wedge drills in. Layout is
- * recomputed each draw from the allocation, so it reflows on resize. */
+ * sized by its share of its parent. Colours are Baobab's own palette interpolated
+ * by the wedge's angular position, darkened per depth; hovering brightens a wedge
+ * and its lineage to the centre and shows a name/size tooltip; clicking a folder
+ * wedge drills in. Layout is recomputed each draw, so it reflows on resize. */
 export class SunburstView {
   widget: any
   root: UsageNode | null = null
@@ -33,6 +45,8 @@ export class SunburstView {
   constructor() {
     this.widget = new Gtk.DrawingArea({ hexpand: true, vexpand: true })
     this.widget.setDrawFunc((...a: any[]) => this._draw(a[1], a[2], a[3]))
+    this.widget.setHasTooltip(true)
+    this.widget.on('query-tooltip', (...a: any[]) => this._onQueryTooltip(a[0], a[1], a[3]))
 
     const motion = new Gtk.EventControllerMotion()
     motion.on('motion', (...a: any[]) => { const [x, y] = a.slice(-2); this._setHover(this._hit(x, y)) })
@@ -60,9 +74,8 @@ export class SunburstView {
     let self = parent
     if (depth >= 1) {
       const inner = this._centre + (depth - 1) * this._thickness
-      const mid = (a0 + a1) / 2
       self = this.segments.length
-      this.segments.push({ node, depth, a0, a1, inner, outer: inner + this._thickness, parent, hue: ((mid - TOP) % TAU + TAU) % TAU / TAU * 360 })
+      this.segments.push({ node, depth, a0, a1, inner, outer: inner + this._thickness, parent, rel: ((a0 - TOP) % TAU + TAU) % TAU / TAU * 100 })
     }
     if (depth >= RINGS || !node.children || node.bytes <= 0) return
     let a = a0
@@ -100,6 +113,16 @@ export class SunburstView {
     if (i >= 0 && this.segments[i].node.isDir) this.onActivate(this.segments[i].node)
   }
 
+  _onQueryTooltip(x: number, y: number, tooltip: any): boolean {
+    const i = this._hit(x, y)
+    if (i < 0) return false
+    const node = this.segments[i].node
+    const total = this.root?.bytes || 0
+    const pct = total > 0 ? ` · ${Math.round((node.bytes / total) * 100)}%` : ''
+    tooltip.setMarkup(`<b>${escapeMarkup(node.name)}</b>\n${formatBytes(node.bytes)}${pct}`)
+    return true
+  }
+
   /* Whether a segment is the hovered one or an ancestor of it (its lineage). */
   _inLineage(i: number): boolean {
     if (this._hover < 0) return false
@@ -117,14 +140,12 @@ export class SunburstView {
     cr.setSourceRgba(fg.red, fg.green, fg.blue, 0.10); cr.fill()
     cr.arc(this._cx, this._cy, this._centre, 0, TAU)
     cr.setSourceRgba(fg.red, fg.green, fg.blue, 0.25); cr.setLineWidth(1); cr.stroke()
+    /* Names last, on top of every wedge, only where they fully fit (Baobab). */
+    for (const s of this.segments) this._drawLabel(cr, s)
   }
 
   _drawSegment(cr: any, s: Segment, i: number): void {
-    let sat = clamp(0.55 - (s.depth - 1) * 0.07, 0.16, 0.55)
-    let val = clamp(0.80 + (s.depth - 1) * 0.035, 0.80, 0.95)
-    if (this._inLineage(i)) { sat = clamp(sat + 0.12, 0, 1); val = clamp(val + 0.08, 0, 1) }
-    const [r, g, b] = hsv(s.hue, sat, val)
-
+    const [r, g, b] = wedgeColour(s.rel, s.depth, this._inLineage(i))
     cr.newPath()
     cr.arc(this._cx, this._cy, s.outer, s.a0, s.a1)
     cr.arcNegative(this._cx, this._cy, s.inner, s.a1, s.a0)
@@ -132,6 +153,55 @@ export class SunburstView {
     cr.setSourceRgb(r, g, b); cr.fillPreserve()
     cr.setSourceRgba(0, 0, 0, 0.28); cr.setLineWidth(1); cr.stroke()
   }
+
+  /* Draw a wedge's name tangentially (rotated to follow the ring, flipped to stay
+   * upright), but only when the whole name fits the wedge — so only the big ones
+   * get labelled, matching Baobab. */
+  _drawLabel(cr: any, s: Segment): void {
+    const mid = (s.inner + s.outer) / 2
+    const arc = (s.a1 - s.a0) * mid
+    const band = s.outer - s.inner
+    if (arc < 34 || band < 13) return                 // too small to bother measuring
+
+    const layout = PangoCairo.createLayout(cr)
+    layout.setFontDescription(Pango.FontDescription.fromString('Sans 9'))
+    layout.setText(s.node.name, -1)
+    const [pw, ph] = layout.getPixelSize()
+    if (pw > arc - 10 || ph > band - 4) return          // require a full fit
+
+    const m = (s.a0 + s.a1) / 2
+    let a = m + Math.PI / 2                               // tangent to the ring
+    a = ((a + Math.PI) % TAU + TAU) % TAU - Math.PI       // normalise to (-π, π]
+    if (a > Math.PI / 2 || a < -Math.PI / 2) a += Math.PI // keep text upright
+
+    const [r, g, b] = wedgeColour(s.rel, s.depth, false)
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    cr.save()
+    cr.translate(this._cx + Math.cos(m) * mid, this._cy + Math.sin(m) * mid)
+    cr.rotate(a)
+    if (lum > 0.6) cr.setSourceRgba(0, 0, 0, 0.82)
+    else cr.setSourceRgba(1, 1, 1, 0.95)
+    cr.moveTo(-pw / 2, -ph / 2)
+    PangoCairo.showLayout(cr, layout)
+    cr.restore()
+  }
+}
+
+/* Baobab's `get_item_color`: interpolate the palette by angular position
+ * (`rel` 0..100), darken by depth, and — when highlighted — normalise to full
+ * brightness (divide by the max channel). */
+function wedgeColour(rel: number, depth: number, highlighted: boolean): [number, number, number] {
+  const cn = Math.min(5, Math.floor(rel / COLOR_SEG))
+  const A = PALETTE[cn], B = PALETTE[(cn + 1) % PALETTE.length]
+  const f = (rel - cn * COLOR_SEG) / COLOR_SEG
+  let r = A[0] - (A[0] - B[0]) * f
+  let g = A[1] - (A[1] - B[1]) * f
+  let b = A[2] - (A[2] - B[2]) * f
+  const intensity = 1 - ((depth - 1) * 0.3) / RINGS
+  r *= intensity; g *= intensity; b *= intensity
+  if (highlighted) { const mx = Math.max(r, g, b, 1e-4); r /= mx; g /= mx; b /= mx }
+  return [r, g, b]
 }
 
 /* Whether angle `a` (any range) lies within the clockwise arc [a0, a1]. */
@@ -142,15 +212,6 @@ function arcContains(a: number, a0: number, a1: number): boolean {
   return d <= len
 }
 
-function clamp(v: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, v)) }
-
-/* HSV (h in degrees, s/v in 0..1) → RGB in 0..1. */
-function hsv(h: number, s: number, v: number): [number, number, number] {
-  const hh = (((h % 360) + 360) % 360) / 60
-  const c = v * s, x = c * (1 - Math.abs((hh % 2) - 1)), m = v - c
-  let r = 0, g = 0, b = 0
-  if (hh < 1) { r = c; g = x } else if (hh < 2) { r = x; g = c }
-  else if (hh < 3) { g = c; b = x } else if (hh < 4) { g = x; b = c }
-  else if (hh < 5) { r = x; b = c } else { r = c; b = x }
-  return [r + m, g + m, b + m]
+function escapeMarkup(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }

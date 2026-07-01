@@ -243,6 +243,8 @@ export class AppWindow {
     add('toggle-split', () => this.activeTab?.toggleSplit())
     add('focus-other-pane', () => this.activeTab?.focusOtherPane())
     add('command-palette', () => this._openPalette())
+    add('copy-to-other-pane', () => this._copyToOtherPane(false))
+    add('move-to-other-pane', () => this._copyToOtherPane(true))
     add('close-tab', () => { if (this.activeTab) this.tabView.closePage(this.activeTab.page) })
     add('tab-prev', () => this.tabView.selectPreviousPage())
     add('tab-next', () => this.tabView.selectNextPage())
@@ -419,10 +421,11 @@ export class AppWindow {
       act('Analyze Disk Usage', 'disk-usage', { icon: 'drive-harddisk-symbolic', primary: true })
     }
 
-    /* Dual-pane targets (primary when split + selection). */
+    /* Dual-pane targets (primary when split + selection). The search text carries
+     * a "split pane" alias so a query for "split" surfaces them too. */
     if (tab?.isSplit && sel.length) {
-      items.push({ label: 'Copy to Other Pane', group: 'action', search: 'Copy to Other Pane', icon: 'edit-copy-symbolic', primary: true, run: () => this._copyToOtherPane(false) })
-      items.push({ label: 'Move to Other Pane', group: 'action', search: 'Move to Other Pane', icon: 'go-next-symbolic', primary: true, run: () => this._copyToOtherPane(true) })
+      items.push({ label: 'Copy to Other Pane', group: 'action', search: 'Copy to Other Pane split', icon: 'edit-copy-symbolic', primary: true, run: () => this._activate('copy-to-other-pane') })
+      items.push({ label: 'Move to Other Pane', group: 'action', search: 'Move to Other Pane split', icon: 'go-next-symbolic', primary: true, run: () => this._activate('move-to-other-pane') })
     }
 
     /* Recent folders (primary), most-frecent first, excluding the current one. */
@@ -577,7 +580,7 @@ export class AppWindow {
   showContextMenu(tab: Tab, widget: any, x: number, y: number, target: Entry | null): void {
     const inTrash = this._inTrash(tab.location)
     this._pasteTarget = target && isDirectory(target.info) && !inTrash ? target.file : tab.location
-    const menu = buildContextMenu({ target, inTrash, clipboardEmpty: this.clipboard.isEmpty })
+    const menu = buildContextMenu({ target, inTrash, clipboardEmpty: this.clipboard.isEmpty, isSplit: tab.isSplit })
 
     const pop = Gtk.PopoverMenu.newFromModel(menu)
     pop.setParent(widget)

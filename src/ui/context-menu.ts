@@ -7,12 +7,14 @@ export interface MenuContext {
   target: Entry | null
   inTrash: boolean
   clipboardEmpty: boolean
+  isSplit: boolean
 }
 
 /* Builds the file-view context-menu model (nautilus-like sections), varying by
- * whether an item is targeted, whether we're in Trash, and clipboard state.
- * Pure — the window owns popover creation/positioning and the paste target. */
-export function buildContextMenu({ target, inTrash, clipboardEmpty }: MenuContext): any {
+ * whether an item is targeted, whether we're in Trash, clipboard state, and
+ * whether the tab is split (dual-pane copy/move targets). Pure — the window
+ * owns popover creation/positioning and the paste target. */
+export function buildContextMenu({ target, inTrash, clipboardEmpty, isSplit }: MenuContext): any {
   const menu = Gio.Menu.new()
   const section = (...items: Array<[string, string]>) => {
     const s = Gio.Menu.new()
@@ -33,6 +35,8 @@ export function buildContextMenu({ target, inTrash, clipboardEmpty }: MenuContex
     const edit: Array<[string, string]> = [['Cut', 'win.cut'], ['Copy', 'win.copy']]
     if (isDir && !clipboardEmpty) edit.push(['Paste Into Folder', 'win.paste'])
     section(...edit)
+
+    if (isSplit) section(['Copy to Other Pane', 'win.copy-to-other-pane'], ['Move to Other Pane', 'win.move-to-other-pane'])
 
     section(['Rename…', 'win.rename'], ['Create Link', 'win.create-link'],
       ['Move to Trash', 'win.trash'], ['Delete Permanently', 'win.delete'])

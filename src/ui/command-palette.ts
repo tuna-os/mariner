@@ -117,9 +117,24 @@ export class CommandPalette {
   _render(): void {
     let child
     while ((child = this.listBox.getFirstChild())) this.listBox.remove(child)
+    if (!this.filtered.length) {
+      this.listBox.append(this._emptyRow())
+      this.selected = -1
+      return
+    }
     for (const item of this.filtered) this.listBox.append(this._row(item))
     this.selected = 0
     this._select(0)
+  }
+
+  /* Non-selectable placeholder shown when nothing matches the query. */
+  _emptyRow(): any {
+    const row = new Gtk.ListBoxRow({ selectable: false, activatable: false })
+    const label = new Gtk.Label({ label: 'No matching commands or folders' })
+    label.addCssClass('dim-label')
+    label.addCssClass('mariner-command-empty')
+    row.setChild(label)
+    return row
   }
 
   _row(item: PaletteItem): any {

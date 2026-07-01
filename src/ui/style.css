@@ -215,3 +215,6 @@
   margin-left: 12px;
   font-size: 0.9em;
 }
+.mariner-command-palette .mariner-command-empty {
+  padding: 24px 12px;
+}

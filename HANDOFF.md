@@ -90,7 +90,15 @@ functional tests):
   disc = the folder, each ring out one level, wedges sized by share, coloured with
   Baobab's own palette; hover highlights a wedge + its lineage and shows a
   name/size tooltip, big wedges are labelled, click a folder wedge drills in.
-- Accelerators wired in `main.ts` (`ACCELS`); Keyboard Shortcuts window lists them.
+- **Command palette** (Ctrl+P): one search field over a single ranked list of
+  commands + recently-visited folders. Empty query shows the selection's context
+  actions (mirroring the context menu) + dual-pane copy/move targets + recent
+  folders (frecency-ranked); typing fuzzy-ranks everything, with an empty-state
+  placeholder when nothing matches. Folder jumps read a global recent-folders
+  store; actions run through the existing `win.*` GActions. See §6d.
+- Accelerators in `accels.ts` (`ACCELS`, shared by `main.ts`'s app-level accels
+  and a window-level `Gtk.ShortcutController`); Keyboard Shortcuts window lists
+  them; `formatAccel`/`accelHint` render them for display.
 - **Interaction**: the file view grabs focus on load/navigation (so typeahead
   and selection keys work immediately — no click required); scroll resets to top
   on navigation (kept on refresh); primary click on empty space clears the
@@ -114,6 +122,7 @@ src/
     process-stream.ts      ProcessStream: line-streaming over Gio.Subprocess (opt. cwd)
     measure.ts             async recursive disk-usage walk (node fs) for Properties
     disk-usage.ts          scanTree(): nested size tree to a depth (rings chart), pure
+    fuzzy-match.ts         fzy subsequence scorer (vendored verbatim from ~/src/zym); pure
     emitter.ts             re-exports Node EventEmitter (loop-safe, pure JS)
     types.ts               Entry, Place, Prefs, ViewConfig, SortKey, SearchFilter, CopyItem, Op*
   services/                one responsibility each; emit events; GTK-free
@@ -127,6 +136,7 @@ src/
     clipboard-service.ts   in-app copy/cut state; 'changed' (system clipboard: ui/dnd.ts)
     places-service.ts      getPlaces()/getBookmarks()/getDevices() -> Place[]
     window-state.ts        persist/restore window geometry (JSON under user config dir)
+    recent-folders.ts      global visited-folder store w/ frecency (JSON); feeds palette
   workers/
     search-worker.ts       pure-node BREADTH-FIRST walker -> JSON path per line on stdout
   ui/                      widgets only
@@ -138,6 +148,7 @@ src/
     pathbar.ts             breadcrumb buttons
     dialogs.ts             prompt / confirm / properties (+folder size) / about (Adw)
     context-menu.ts        buildContextMenu(): pure Gio.Menu model for the view
+    command-palette.ts     Ctrl+P palette: fuzzy-ranked commands + recent-folder jump
     conflict-dialog.ts     partitionConflicts() + resolveConflicts() (Replace/Skip/Keep Both)
     operations-queue.ts    header button + popover: per-op progress + cancel (fileOps/archive)
     progress-ring.ts       ProgressRing: circular progress paintable (nautilus-style)
@@ -156,6 +167,7 @@ src/
   pane.ts                  Pane: binds DirectoryService+SearchService <-> FileView (+history/search)
   tab.ts                   Tab: hosts 1–2 Panes (dual-pane) + active-pane; delegates to it
   window.ts                AppWindow: shell assembly, GAction wiring, ops queue, conflicts
+  accels.ts                ACCELS keybinding table + formatAccel/accelHint (shared)
   main.ts                  Adw.Application, accelerators, GLib.MainLoop lifecycle
 ```
 
@@ -397,10 +409,9 @@ implemented yet.
 
 ### Strong second tier
 
-- **Command palette (Ctrl+P / Ctrl+Shift+P)** — fuzzy-jump to any folder and run
-  any action from the keyboard ("VS Code for files"). **Fit:** a searchable
-  popover over recent/bookmarked paths + the existing GActions; typeahead
-  matching logic already exists.
+- **Command palette (Ctrl+P)** — **LANDED** (see §6d): fuzzy-jump to recently-
+  visited folders + run any action from the keyboard ("VS Code for files"), over
+  the existing GActions + a new frecency store.
 - **Content (full-text) search** — wire `ripgrep` into the existing
   out-of-process worker model (`workers/search-worker.ts` already streams
   results), with match previews. Also listed under §6 Remaining.
@@ -552,6 +563,52 @@ Verification harnesses were throwaway `/tmp/h-*.mjs` (per §5).
 
 ---
 
+## 6d. Command palette (LANDED — verified per §5)
+
+A no-prefix **Ctrl+P** palette over one ranked list. Priority: reuse the existing
+GAction set, small decoupled files, no new plumbing.
+
+- **Ranking.** `src/core/fuzzy-match.ts` is fzy's subsequence scorer, vendored
+  verbatim from `~/src/zym` (GTK-free, re-syncable). **Strict** matching (no
+  typo-drop) — a small, known command set wants predictable results over
+  forgiveness. `command-palette.ts` scores each item's `search` text per
+  keystroke; empty query shows `primary` items in order, a typed query sorts by
+  score. Folder items fold a normalised frecency into the score as a tie-break.
+- **Recent folders.** `src/services/recent-folders.ts` = a global visited-folder
+  store keyed by URI, ranked by **frecency** (frequency decayed by recency,
+  30-day half-life), persisted to `recent-folders.json` under the user config dir
+  (same pattern as `window-state.ts`). `Pane.navigate`/`_go` record every explicit
+  navigation. The **current** folder is excluded from the jump list.
+- **Catalogue** (`window.ts` `_paletteItems`). Selection-/trash-/split-aware,
+  mirroring `buildContextMenu`'s branching: the selection's context actions +
+  dual-pane copy/move targets + recent folders are `primary` (shown on an empty
+  query); a broader global command list is appended for typed queries. Deduped by
+  action name. Every action runs via its existing `win.*` GAction through an added
+  name→action map (`this._actions` / `_activate(name)`) — **never a GVariant
+  target** (node-gtk corrupts variants passed into callbacks, §4). Folder items
+  navigate the active pane via a captured `GFile` closure.
+- **Widget** (`src/ui/command-palette.ts`). Reusable `Adw.Dialog` (built once,
+  reused like QuickLook) + `Gtk.SearchEntry` + `Gtk.ListBox`. Filters on the
+  `changed` signal (immediate) not `search-changed` (debounced ~150ms). Keyboard
+  nav (↑/↓/PgUp/PgDn/Enter/Esc) runs on a **CAPTURE** key controller so the entry
+  keeps focus + typing while arrows drive selection; scroll-into-view is a manual
+  vadjustment calc (uniform row height). Non-selectable placeholder row when
+  nothing matches. `accelHint()` renders each command's shortcut on the right.
+- **Dual-pane ops.** `copy-to-other-pane` / `move-to-other-pane` GActions (mirror
+  `_paste`'s conflict-resolve + undo), shown in the file-view context menu when
+  the tab is split and in the palette (with a `split` search alias). Accels:
+  **Ctrl+Shift+C** / **Ctrl+Shift+X**. Focus the other pane: **F6** or **Alt+W**.
+- **Accels.** `src/accels.ts` also exports `formatAccel` (GTK accel → `Ctrl+Shift+C`)
+  and `accelHint(action)` (first accel, human-readable).
+
+Verified headlessly (per §5): 18-check behavioural harness (frecency order,
+current-folder exclusion, selection-aware catalogue, fuzzy ranking, real GAction
+dispatch, folder navigation) + separate checks for the split context-menu section,
+the `split` alias, the empty state, and the accelerators; plus GSK PNG renders of
+the populated + empty palette.
+
+---
+
 ## 7. Known limitations / rough edges
 
 - **Clipboard**: cut/copy publish to the system clipboard (uri-list +
@@ -569,6 +626,10 @@ Verification harnesses were throwaway `/tmp/h-*.mjs` (per §5).
 - **`empty-trash`** also reachable from the Trash banner / context menu.
 - XDG special dirs are hidden when they resolve to `$HOME` (this machine's config).
 - Search matches **name only** (category/date filters apply on top).
+- **Command palette** jumps only to *recently-visited* folders (no arbitrary-path
+  completion or file search yet — the mode-prefix ideas in §6b would fill this);
+  context actions require the relevant selection. Recent folders persist in
+  `recent-folders.json` under the user config dir and are never pruned below 200.
 - Large single-file copies + archive ops show a **pulsing** (indeterminate)
   progress bar, not a percentage.
 - `tsc` isn't vendored — `npm install` before `npm run typecheck`. The app runs

@@ -37,11 +37,11 @@ function fmtDate(dt: any, pattern: string): string {
   } catch { return '' }
 }
 
-/* Human-friendly modification time: time only for today, "Yesterday" for the
- * day before, month/day + time within the current year, and the full date for
- * anything older. */
-export function formatModified(info: GFileInfo): string {
-  const dt = info.getModificationDateTime?.()
+/* Human-friendly timestamp: time only for today, "Yesterday" for the day
+ * before, month/day + time within the current year, and the full date for
+ * anything older. Shared by every date column (matches nautilus, which formats
+ * modified/accessed/created alike). */
+function humanTime(dt: any): string {
   if (!dt) return ''
   try {
     const local = dt.toLocal?.() ?? dt
@@ -57,6 +57,40 @@ export function formatModified(info: GFileInfo): string {
     if (local.getYear() === now.getYear()) return fmtDate(local, '%b %-d %H:%M')
     return fmtDate(local, '%b %-d, %Y')
   } catch { return '' }
+}
+
+export function formatModified(info: GFileInfo): string {
+  return humanTime(info.getModificationDateTime?.())
+}
+
+export function formatAccessed(info: GFileInfo): string {
+  return humanTime(info.getAccessDateTime?.())
+}
+
+export function formatCreated(info: GFileInfo): string {
+  return humanTime(info.getCreationDateTime?.())
+}
+
+export function formatOwner(info: GFileInfo): string {
+  return info.getAttributeString?.('owner::user') || ''
+}
+
+export function formatGroup(info: GFileInfo): string {
+  return info.getAttributeString?.('owner::group') || ''
+}
+
+/* One rwx triplet from the low 3 bits of a permission nibble. */
+function rwx(bits: number): string {
+  return (bits & 4 ? 'r' : '-') + (bits & 2 ? 'w' : '-') + (bits & 1 ? 'x' : '-')
+}
+
+/* Unix permissions as a 10-char string (e.g. "drwxr-xr-x"), like `ls -l` and
+ * nautilus's Permissions column. Empty when the mode isn't known (remote FS). */
+export function formatPermissions(info: GFileInfo): string {
+  if (!info.hasAttribute?.('unix::mode')) return ''
+  const mode = info.getAttributeUint32('unix::mode')
+  const type = isDirectory(info) ? 'd' : info.getIsSymlink?.() ? 'l' : '-'
+  return type + rwx((mode >> 6) & 7) + rwx((mode >> 3) & 7) + rwx(mode & 7)
 }
 
 export function modifiedUnix(info: GFileInfo): number {
@@ -84,5 +118,6 @@ export function locationName(file: GFile): string {
   if (uri.startsWith('trash:')) return 'Trash'
   if (uri.startsWith('recent:')) return 'Recent'
   if (uri.startsWith('network:')) return 'Network'
+  if (uri.startsWith('computer:')) return 'Computer'
   return F.getBasename(file) || uri
 }

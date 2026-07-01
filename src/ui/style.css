@@ -133,6 +133,19 @@
   padding: 6px;
 }
 
+/* Non-Name columns are bare labels (no cell box); give them a little horizontal
+ * breathing room so adjacent columns aren't cramped. Matched on the column
+ * headers below so titles stay aligned with their values. */
+.mariner-list-view .mariner-meta-cell {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.mariner-list-view columnview > header > button {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
 /* ---- Both views ---- */
 /* The content pane already paints the .view background — drop the views' own to
  * avoid overdraw. */
@@ -217,4 +230,33 @@
 }
 .mariner-command-palette .mariner-command-empty {
   padding: 24px 12px;
+}
+
+/* ---- Computer view (drives / "This PC") ---- */
+/* Each drive is a flat, full-width row: icon, name, mount point, a disk-usage
+ * bar and a "N free of M" caption. */
+.computer-tile {
+  padding: 10px 12px;
+}
+.computer-tile-name {
+  font-weight: bold;
+}
+.computer-tile-desc {
+  font-size: 0.9em;
+}
+.computer-tile-bar {
+  margin-top: 6px;
+  margin-bottom: 1px;
+}
+.computer-tile-bar trough,
+.computer-tile-bar progress {
+  min-height: 6px;
+  border-radius: 3px;
+}
+/* Nearly-full drives read as a warning. */
+.computer-tile-bar-full progress {
+  background-color: @error_color;
+}
+.computer-tile-usage {
+  font-size: 0.9em;
 }

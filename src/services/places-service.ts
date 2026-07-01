@@ -4,6 +4,10 @@ import { F, fileForPath, fileForUri } from '../core/gio.ts'
 import { HOME } from '../core/format.ts'
 import type { Place } from '../core/types.ts'
 
+/* Virtual location backing the Computer interface (the drives/partitions page).
+ * The pane renders a ComputerView for this URI instead of a directory listing. */
+export const COMPUTER_URI = 'computer:///'
+
 const SPECIAL: Array<[any, string, string]> = [
   [GLib.UserDirectory.DIRECTORY_DOCUMENTS, 'Documents', 'folder-documents-symbolic'],
   [GLib.UserDirectory.DIRECTORY_DOWNLOAD, 'Downloads', 'folder-download-symbolic'],
@@ -24,6 +28,11 @@ export function getPlaces(): Place[] {
   }
   places.push({ label: 'Trash', icon: 'user-trash-symbolic', file: fileForUri('trash:///') })
   return places
+}
+
+/* The Computer entry — its own sidebar section (see the sidebar's build()). */
+export function getComputer(): Place {
+  return { label: 'Computer', icon: 'computer-symbolic', file: fileForUri(COMPUTER_URI) }
 }
 
 export function getBookmarks(): Place[] {

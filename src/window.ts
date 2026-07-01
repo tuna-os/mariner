@@ -23,8 +23,9 @@ import { preferencesDialog } from './ui/preferences.ts'
 import { batchRenameDialog } from './ui/batch-rename.ts'
 import { compressDialog } from './ui/compress.ts'
 import { openWithDialog } from './ui/open-with.ts'
-import { diskUsageDialog } from './ui/disk-usage.ts'
 import { buildContextMenu } from './ui/context-menu.ts'
+import { columnChooserDialog } from './ui/column-chooser.ts'
+import { defaultColumnConfig } from './core/columns.ts'
 import { QuickLook } from './ui/preview.ts'
 import { OperationsQueue } from './ui/operations-queue.ts'
 import { resolveConflicts, partitionConflicts } from './ui/conflict-dialog.ts'
@@ -44,7 +45,7 @@ function boolValue(b: boolean): any {
 
 export class AppWindow {
   app: any
-  prefs: Prefs = { showHidden: false, sortKey: 'name', sortDesc: false, viewMode: 'grid', iconSize: 64 }
+  prefs: Prefs = { showHidden: false, sortKey: 'name', sortDesc: false, viewMode: 'grid', iconSize: 64, columns: defaultColumnConfig() }
   tabs: Tab[] = []
   _activeTab: Tab | null = null
   searching = false
@@ -54,6 +55,7 @@ export class AppWindow {
   archive = new ArchiveService()
   opsQueue = new OperationsQueue()
   _pasteTarget: GFile | null = null
+  _ctxFile: GFile | null = null
   _cutUris = new Set<string>()
   _quicklook: QuickLook | null = null
   _palette: CommandPalette | null = null
@@ -266,6 +268,7 @@ export class AppWindow {
     add('zoom-in', () => this._zoom(ZOOM_STEP))
     add('zoom-out', () => this._zoom(-ZOOM_STEP))
     add('zoom-reset', () => this._zoom(DEFAULT_ZOOM - this.prefs.iconSize))
+    add('choose-columns', () => this._chooseColumns())
     add('invert-selection', () => this.activeTab?.view.invertSelection())
 
     for (const key of ['name', 'size', 'type', 'modified'] as const) {
@@ -309,16 +312,23 @@ export class AppWindow {
     add('extract-here', () => this._extractHere())
     add('compress', () => this._compress())
     add('disk-usage', () => this._diskUsage())
+
+    /* Computer-view drive menu — these act on `_ctxFile` (the drive's mount
+     * point), set when the menu is opened, since that view has no selection. */
+    add('drive-open', () => { if (this._ctxFile) this.navigate(this._ctxFile) })
+    add('drive-open-tab', () => { if (this._ctxFile) this.openTab(this._ctxFile) })
+    add('drive-usage', () => { if (this._ctxFile) this._propertiesFor(this._ctxFile, { expandUsage: true }) })
+    add('drive-properties', () => { if (this._ctxFile) this._propertiesFor(this._ctxFile) })
   }
 
-  /* Analyze disk usage of the selected folder (or the current location) as a
-   * rings chart. Local paths only. */
+  /* Analyze disk usage of the selected folder (or the current location): opens
+   * Properties with the "Disk Usage" chart pre-expanded. Local paths only. */
   _diskUsage(): void {
     const sel = this._selected()[0]
-    const target = sel && isDirectory(sel.info) ? sel.file : this.activeTab?.location
-    const path = target && F.getPath(target)
-    if (!path) { this.toast('Disk usage is only available for local folders'); return }
-    diskUsageDialog(this.window, path)
+    if (sel && isDirectory(sel.info)) { showProperties(this.window, sel.info, sel.file, { expandUsage: true }); return }
+    const loc = this.activeTab?.location
+    if (loc && F.getPath(loc)) { this._propertiesFor(loc, { expandUsage: true }); return }
+    this.toast('Disk usage is only available for local folders')
   }
 
   /* ---- Command palette ---- */
@@ -503,6 +513,16 @@ export class AppWindow {
     this.activeTab?.applyPrefs()
   }
 
+  /* Open the "Visible Columns" chooser. Switches to the list view first so the
+   * edits are visible as they apply (columns only affect the list). */
+  _chooseColumns(): void {
+    if (this.prefs.viewMode !== 'list') this._setViewMode('list')
+    columnChooserDialog(this.window, this.prefs.columns, columns => {
+      this.prefs.columns = columns
+      this.activeTab?.applyColumns()
+    })
+  }
+
   /* ---- Tabs / navigation ---- */
   openTab(file: GFile): Tab {
     const tab = new Tab(this, file)
@@ -580,8 +600,26 @@ export class AppWindow {
   showContextMenu(tab: Tab, widget: any, x: number, y: number, target: Entry | null): void {
     const inTrash = this._inTrash(tab.location)
     this._pasteTarget = target && isDirectory(target.info) && !inTrash ? target.file : tab.location
-    const menu = buildContextMenu({ target, inTrash, clipboardEmpty: this.clipboard.isEmpty, isSplit: tab.isSplit })
+    this._popupMenu(buildContextMenu({ target, inTrash, clipboardEmpty: this.clipboard.isEmpty, isSplit: tab.isSplit }), widget, x, y)
+  }
 
+  /* Context menu for a drive/partition row in the Computer view. Its actions
+   * target `_ctxFile` (the drive's mount point), not a file-view selection. */
+  showDriveMenu(file: GFile, widget: any, x: number, y: number): void {
+    this._ctxFile = file
+    const menu = Gio.Menu.new()
+    const open = Gio.Menu.new()
+    open.append('Open', 'win.drive-open')
+    open.append('Open in New Tab', 'win.drive-open-tab')
+    menu.appendSection(null, open)
+    const info = Gio.Menu.new()
+    info.append('Analyze Disk Usage', 'win.drive-usage')
+    info.append('Properties', 'win.drive-properties')
+    menu.appendSection(null, info)
+    this._popupMenu(menu, widget, x, y)
+  }
+
+  _popupMenu(menu: any, widget: any, x: number, y: number): void {
     const pop = Gtk.PopoverMenu.newFromModel(menu)
     pop.setParent(widget)
     pop.setHasArrow(false)
@@ -823,11 +861,11 @@ export class AppWindow {
     if (sel[0]) showProperties(this.window, sel[0].info, sel[0].file)
   }
 
-  /* Properties for an arbitrary file (used by the pathbar crumb menu). */
-  _propertiesFor(file: GFile): void {
+  /* Properties for an arbitrary file (pathbar crumb menu, Computer drive menu). */
+  _propertiesFor(file: GFile, opts?: { expandUsage?: boolean }): void {
     try {
       const info = F.queryInfo(file, ATTRS, Gio.FileQueryInfoFlags.NONE, null)
-      showProperties(this.window, info, file)
+      showProperties(this.window, info, file, opts)
     } catch {}
   }
 

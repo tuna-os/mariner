@@ -10,7 +10,7 @@ import { ACCELS } from './accels.ts'
 import { F, fileForPath, fileForUri, ATTRS } from './core/gio.ts'
 import { HOME, locationName, isDirectory, displayName } from './core/format.ts'
 import { ClipboardService } from './services/clipboard-service.ts'
-import { FileOperations } from './services/file-operations.ts'
+import { FileOperations, uniqueChild } from './services/file-operations.ts'
 import { UndoService } from './services/undo-service.ts'
 import { ArchiveService, isArchive } from './services/archive-service.ts'
 import { loadWindowState, saveWindowState } from './services/window-state.ts'
@@ -22,9 +22,13 @@ import { preferencesDialog } from './ui/preferences.ts'
 import { batchRenameDialog } from './ui/batch-rename.ts'
 import { compressDialog } from './ui/compress.ts'
 import { openWithDialog } from './ui/open-with.ts'
+import { diskUsageDialog } from './ui/disk-usage.ts'
 import { buildContextMenu } from './ui/context-menu.ts'
+import { QuickLook } from './ui/preview.ts'
+import { OperationsQueue } from './ui/operations-queue.ts'
+import { resolveConflicts, partitionConflicts } from './ui/conflict-dialog.ts'
 import { fileClipboardProvider } from './ui/dnd.ts'
-import type { Prefs, GFile, GFileInfo, Entry, OpError } from './core/types.ts'
+import type { Prefs, GFile, GFileInfo, Entry, CopyItem, OpError } from './core/types.ts'
 
 const MIN_ZOOM = 32, MAX_ZOOM = 128, ZOOM_STEP = 16, DEFAULT_ZOOM = 64
 
@@ -45,9 +49,10 @@ export class AppWindow {
   fileOps = new FileOperations()
   undo = new UndoService()
   archive = new ArchiveService()
+  opsQueue = new OperationsQueue()
   _pasteTarget: GFile | null = null
-  _pulseTimer = 0
   _cutUris = new Set<string>()
+  _quicklook: QuickLook | null = null
 
   window!: any
   toastOverlay!: any
@@ -55,9 +60,6 @@ export class AppWindow {
   sidebar!: any
   toolbar!: any
   tabView!: any
-  _progressBar!: any
-  _progressLabel!: any
-  _progressRevealer!: any
   _trashBanner!: any
   backAction!: any
   forwardAction!: any
@@ -135,6 +137,7 @@ export class AppWindow {
       onSearchFilter: (f) => this.activeTab?.setSearchFilter(f),
       onSearchExit: () => { if (this.searching) this._setSearch(false) },
     })
+    this.toolbar.header.packEnd(this.opsQueue.button)
     this.tabView = new Adw.TabView()
     this.tabView.on('notify::selected-page', () => this._onTabSwitched())
     this.tabView.on('close-page', (...a: any[]) => this._onClosePage(a[a.length - 1]))
@@ -148,7 +151,6 @@ export class AppWindow {
     contentView.addTopBar(tabBar)
     contentView.addTopBar(this._trashBanner)
     contentView.setContent(this.tabView)
-    contentView.addBottomBar(this._buildProgressBar())
     this.split.setContent(contentView)
 
     this.toastOverlay.setChild(this.split)
@@ -161,21 +163,12 @@ export class AppWindow {
     } catch { /* responsive collapse is optional */ }
   }
 
-  _buildProgressBar(): any {
-    this._progressBar = new Gtk.ProgressBar({ pulseStep: 0.1, valign: Gtk.Align.CENTER, hexpand: true })
-    this._progressLabel = new Gtk.Label({ cssClasses: ['dim-label'] })
-    const box = new Gtk.Box({ spacing: 12, marginTop: 4, marginBottom: 4, marginStart: 8, marginEnd: 8 })
-    box.append(this._progressLabel)
-    box.append(this._progressBar)
-    this._progressRevealer = new Gtk.Revealer({ child: box, revealChild: false })
-    return this._progressRevealer
-  }
-
   _appMenu(): any {
     const menu = Gio.Menu.new()
     const s1 = Gio.Menu.new()
     s1.append('New Window', 'win.new-window')
     s1.append('New Tab', 'win.new-tab')
+    s1.append('Split View', 'win.toggle-split')
     menu.appendSection(null, s1)
     const s2 = Gio.Menu.new()
     s2.append('Undo', 'win.undo')
@@ -192,19 +185,13 @@ export class AppWindow {
 
   /* ---- File-operation feedback ---- */
   _wireFileOps(): void {
-    this.fileOps.on('begin', (p: { title: string }) => {
-      this._progressLabel.setLabel(p.title)
-      this._progressBar.setFraction(0)
-      this._progressRevealer.setRevealChild(true)
-    })
-    this.fileOps.on('progress', () => this._progressBar.pulse())
-    this.fileOps.on('done', () => this._progressRevealer.setRevealChild(false))
+    /* Long ops show per-op progress + cancel in the header operations queue. */
+    this.opsQueue.bind(this.fileOps, 'f', (id: number) => this.fileOps.cancel(id))
+    this.opsQueue.bind(this.archive, 'a')
+
     /* Quick-op success toasts are shown by the window methods that record undo,
      * so they can attach an "Undo" button; the service's 'notify' is unused. */
-    this.fileOps.on('error', ({ title, message }: OpError) => {
-      this._progressRevealer.setRevealChild(false)
-      this.toast(`${title} failed: ${message}`)
-    })
+    this.fileOps.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
     this.undo.on('changed', () => {
       this.undoAction.setEnabled(this.undo.canUndo)
       this.redoAction.setEnabled(this.undo.canRedo)
@@ -213,27 +200,12 @@ export class AppWindow {
     /* Track cut files so the view can dim them until pasted. */
     this.clipboard.on('changed', () => {
       this._cutUris = new Set(this.clipboard.cut ? this.clipboard.files.map(f => F.getUri(f)) : [])
-      this.activeTab?.view.refreshCells()
+      for (const p of this.activeTab?.panes ?? []) p.view.refreshCells()
     })
 
-    /* Archive ops report begin/done/error; drive the same progress bar with a
-     * pulse (no byte-level progress from the CLI tools). */
-    this.archive.on('begin', ({ title }: { title: string }) => this._startPulse(title))
-    this.archive.on('done', ({ title }: { title: string }) => { this._stopPulse(); this.toast(`${title} — done`) })
-    this.archive.on('error', ({ title, message }: OpError) => { this._stopPulse(); this.toast(`${title} failed: ${message}`) })
-  }
-
-  _startPulse(title: string): void {
-    this._progressLabel.setLabel(title)
-    this._progressBar.setFraction(0)
-    this._progressRevealer.setRevealChild(true)
-    if (this._pulseTimer) GLib.sourceRemove(this._pulseTimer)
-    this._pulseTimer = GLib.timeoutAdd(GLib.PRIORITY_DEFAULT, 100, () => { this._progressBar.pulse(); return true })
-  }
-
-  _stopPulse(): void {
-    if (this._pulseTimer) { GLib.sourceRemove(this._pulseTimer); this._pulseTimer = 0 }
-    this._progressRevealer.setRevealChild(false)
+    /* Archive ops also flow through the queue (indeterminate); toast on finish. */
+    this.archive.on('done', ({ title }: { title: string }) => this.toast(`${title} — done`))
+    this.archive.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
   }
 
   /* ---- Actions ---- */
@@ -259,6 +231,8 @@ export class AppWindow {
 
     add('new-tab', () => this.openTab(this.activeTab?.location ?? fileForPath(HOME)))
     add('new-window', () => new AppWindow(this.app, this.activeTab?.location ?? fileForPath(HOME)))
+    add('toggle-split', () => this.activeTab?.toggleSplit())
+    add('focus-other-pane', () => this.activeTab?.focusOtherPane())
     add('close-tab', () => { if (this.activeTab) this.tabView.closePage(this.activeTab.page) })
     add('tab-prev', () => this.tabView.selectPreviousPage())
     add('tab-next', () => this.tabView.selectNextPage())
@@ -305,6 +279,7 @@ export class AppWindow {
     this.toolbar.searchButton.setActionName('win.search')
 
     add('select-all', () => this.activeTab?.view.selectAll())
+    add('preview', () => { if (this.activeTab) this.togglePreview(this.activeTab) })
     add('open', () => this._openSelection())
     add('open-new-tab', () => this._openNewTab())
     add('open-with', () => { const s = this._selected()[0]; if (s) openWithDialog(this.window, s.info, s.file) })
@@ -321,6 +296,17 @@ export class AppWindow {
     add('restore', () => this._restore())
     add('extract-here', () => this._extractHere())
     add('compress', () => this._compress())
+    add('disk-usage', () => this._diskUsage())
+  }
+
+  /* Analyze disk usage of the selected folder (or the current location) as a
+   * treemap. Local paths only. */
+  _diskUsage(): void {
+    const sel = this._selected()[0]
+    const target = sel && isDirectory(sel.info) ? sel.file : this.activeTab?.location
+    const path = target && F.getPath(target)
+    if (!path) { this.toast('Disk usage is only available for local folders'); return }
+    diskUsageDialog(this.window, path)
   }
 
   _inTrash(file: GFile | null = this.activeTab?.location ?? null): boolean {
@@ -389,6 +375,16 @@ export class AppWindow {
   }
 
   onTabChanged(tab: Tab): void { if (tab === this._activeTab) this.refreshChrome(tab) }
+
+  /* Toggle Quick Look for the active pane: page through the entries the view is
+   * showing, starting at the selection; keep the view's selection in sync. */
+  togglePreview(tab: Tab): void {
+    const view = tab.view
+    const entries = view.entries()
+    if (!entries.length) return
+    if (!this._quicklook) this._quicklook = new QuickLook(this.window)
+    this._quicklook.toggle(entries, view.selectedIndex(), i => view.selectIndex(i))
+  }
 
   refreshChrome(tab: Tab): void {
     this.toolbar.pathbar.setLocation(tab.location)
@@ -519,37 +515,61 @@ export class AppWindow {
   /* Files dropped into a view. Dropping onto a folder cell (targetDir) moves
    * them into it; dropping onto the background copies them into the current
    * folder (the cross-app case). Files already in the destination are skipped. */
-  onDropFiles(tab: Tab, files: GFile[], targetDir?: GFile): void {
+  async onDropFiles(tab: Tab, files: GFile[], targetDir?: GFile): Promise<void> {
     const dest = targetDir ?? tab.location
     const destUri = F.getUri(dest)
     const incoming = files.filter(f => { const p = F.getParent(f); return !p || F.getUri(p) !== destUri })
     if (!incoming.length) return
+    const plan = await this._resolvePlan(incoming, dest)
+    if (!plan || !plan.length) return
     if (targetDir) {
       const origParent = F.getParent(incoming[0])
-      let dests = this.fileOps.move(incoming, dest)
+      let dests = this.fileOps.moveItems(plan)
       if (origParent) this.undo.push({
         undo: () => { dests = this.fileOps.move(dests, origParent) },
-        redo: () => { dests = this.fileOps.move(incoming, dest) },
+        redo: () => { dests = this.fileOps.moveItems(plan) },
         undoLabel: 'Undo Move', redoLabel: 'Redo Move',
       })
     } else {
-      const dests = this.fileOps.copy(incoming, dest)
+      let dests = this.fileOps.copyItems(plan)
       this.undo.push({
         undo: () => this.fileOps.trash(dests),
-        redo: () => this.fileOps.copy(incoming, dest),
+        redo: () => { dests = this.fileOps.copyItems(plan) },
         undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
       })
     }
   }
 
-  _paste(): void {
+  /* Turn a set of sources + a destination into a runnable copy/move plan,
+   * prompting for any name collisions (Replace / Skip / Keep Both). Returns null
+   * if the user cancels the operation, or the (possibly empty) resolved plan. */
+  async _resolvePlan(files: GFile[], destDir: GFile): Promise<CopyItem[] | null> {
+    const { free, conflicts } = partitionConflicts(files, destDir)
+    const items: CopyItem[] = free.map(src => ({ src, dest: F.getChild(destDir, F.getBasename(src)) }))
+    if (conflicts.length) {
+      const res = await resolveConflicts(this.window, conflicts, destDir)
+      if (!res) return null
+      for (const c of conflicts) {
+        const action = res.get(c.src)
+        if (action === 'skip') continue
+        if (action === 'replace') items.push({ src: c.src, dest: c.dest, replace: true })
+        else items.push({ src: c.src, dest: uniqueChild(destDir, c.name) })
+      }
+    }
+    return items
+  }
+
+  async _paste(): Promise<void> {
     const dest = this._pasteTarget || this.activeTab?.location
     if (!dest) return
     if (this.clipboard.isEmpty) { this._pasteFromSystem(dest); return }
     const files = this.clipboard.files.slice()
-    if (this.clipboard.cut) {
+    const cut = this.clipboard.cut
+    const plan = await this._resolvePlan(files, dest)
+    if (!plan || !plan.length) return
+    if (cut) {
       const origParent = F.getParent(files[0])
-      let dests = this.fileOps.move(files, dest)
+      let dests = this.fileOps.moveItems(plan)
       this.clipboard.clear()
       if (origParent) this.undo.push({
         undo: () => { dests = this.fileOps.move(dests, origParent) },
@@ -557,10 +577,10 @@ export class AppWindow {
         undoLabel: 'Undo Move', redoLabel: 'Redo Move',
       })
     } else {
-      let dests = this.fileOps.copy(files, dest)
+      let dests = this.fileOps.copyItems(plan)
       this.undo.push({
         undo: () => this.fileOps.trash(dests),
-        redo: () => { dests = this.fileOps.copy(files, dest) },
+        redo: () => { dests = this.fileOps.copyItems(plan) },
         undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
       })
     }

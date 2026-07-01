@@ -73,6 +73,21 @@ functional tests):
   (+ async folder size), compress, open-with, preferences, keyboard shortcuts,
   about.
 - **Live refresh** via `Gio.FileMonitor` (debounced).
+- **Dual pane** (F3): a tab hosts 1–2 `Pane`s (extracted browsing controller) in a
+  `Gtk.Paned`; the active pane (focus-follows, framed) drives the toolbar/actions;
+  F6 switches panes; copy/move/drag between them. See §6c.
+- **Space-to-preview / Quick Look** (Space): a floating preview window paging the
+  view's entries (arrows), rendering images (`Gtk.Picture`), text/code (async
+  bounded read → monospace), audio/video (`Gtk.Video`), else a metadata card.
+- **Content search** (search funnel → "Contents" switch): full-text via `ripgrep`,
+  reusing the streamed path→info resolve pipeline; name search stays the worker.
+- **Conflict resolution + operations queue**: paste/drop preflight top-level name
+  collisions → Replace / Skip / Keep Both (+ apply-to-all); a header operations
+  button lists each running op with per-op progress + cancel (replaces the single
+  bottom bar; archive ops flow through it too).
+- **Disk-usage treemap** (context menu → Analyze Disk Usage): a squarified treemap
+  (`Gtk.DrawingArea` + cairo + PangoCairo) of a folder's children by recursive
+  size, scanned live; click a folder tile to drill in, Back to ascend.
 - Accelerators wired in `main.ts` (`ACCELS`); Keyboard Shortcuts window lists them.
 - **Interaction**: the file view grabs focus on load/navigation (so typeahead
   and selection keys work immediately — no click required); scroll resets to top
@@ -96,13 +111,15 @@ src/
     navigation.ts          History (back/forward stacks) — pure
     process-stream.ts      ProcessStream: line-streaming over Gio.Subprocess (opt. cwd)
     measure.ts             async recursive disk-usage walk (node fs) for Properties
+    disk-usage.ts          scanChildren(): each child's recursive size (treemap), pure
+    squarify.ts            squarified treemap layout (Bruls et al.) — pure, no GTK
     emitter.ts             re-exports Node EventEmitter (loop-safe, pure JS)
-    types.ts               Entry, Place, Prefs, ViewConfig, SortKey, SearchFilter, Op*
+    types.ts               Entry, Place, Prefs, ViewConfig, SortKey, SearchFilter, CopyItem, Op*
   services/                one responsibility each; emit events; GTK-free
     directory-service.ts   load(dir): 'loading'|'items'|'ready'|'error'|'invalidated'
-    search-service.ts      search(dir,q,{filter}): 'start'|'result'|'end'|'error'
-    file-operations.ts     copy/move/delete/trash/rename/newFolder/link/restore/emptyTrash
-                           long ops: 'begin'|'progress'|'done'; quick: 'notify'; 'error'
+    search-service.ts      search(dir,q,{filter}): name worker | ripgrep (filter.contents)
+    file-operations.ts     copy/move(Items)/delete/trash/rename/newFolder/link/restore/emptyTrash
+                           long ops carry an id: 'begin'|'progress'|'done'|'error'; cancel(id)
     undo-service.ts        pure undo/redo stack of inverse closures; 'changed'
     thumbnail-service.ts   shared: fd-cache lookup + GdkPixbuf generation (idle); exports `thumbnails`
     archive-service.ts     extract/compress via CLI tools (ProcessStream); 'begin'|'done'|'error'
@@ -112,7 +129,7 @@ src/
   workers/
     search-worker.ts       pure-node BREADTH-FIRST walker -> JSON path per line on stdout
   ui/                      widgets only
-    file-view.ts           grid+list+state stack; typeahead; sorted insert; drop target
+    file-view.ts           grid+list+state stack; typeahead; Space→preview; focus-in; drop
     floating-bar.ts        overlay status pill (typeahead indicator) — NautilusFloatingBar
     cells.ts               grid/column cell factories; thumbnails; per-cell drag source
     sidebar.ts             places view (over places-service)
@@ -120,16 +137,23 @@ src/
     pathbar.ts             breadcrumb buttons
     dialogs.ts             prompt / confirm / properties (+folder size) / about (Adw)
     context-menu.ts        buildContextMenu(): pure Gio.Menu model for the view
+    conflict-dialog.ts     partitionConflicts() + resolveConflicts() (Replace/Skip/Keep Both)
+    operations-queue.ts    header button + popover: per-op progress + cancel (fileOps/archive)
+    preview.ts             QuickLook: floating preview window, pages the view's entries
+    preview-renderers.ts   renderPreview(info,file): image/text/av/metadata widgets
+    treemap.ts             TreemapView: squarified treemap on a DrawingArea (cairo+PangoCairo)
+    disk-usage.ts          diskUsageDialog(): treemap window, live scan, drill-down/back
     shortcuts.ts           Adw.ShortcutsDialog (data-driven, mirrors shortcuts-dialog.blp)
     preferences.ts         Adw.PreferencesDialog over prefs (view/sort/hidden)
     batch-rename.ts        multi-select rename (find/replace | numbered) + live preview
-    search-filter.ts       search popover (What/When) -> SearchFilter
+    search-filter.ts       search popover (What/When/Contents) -> SearchFilter
     compress.ts            compress dialog (name + format)
     open-with.ts           app chooser over Gio.AppInfo.getRecommendedForType
     dnd.ts                 DragSource / DropTarget + system-clipboard content provider
     style.ts, style.css    app stylesheet (adapted from ../nautilus/src/resources/style.css)
-  tab.ts                   Tab controller: binds DirectoryService+SearchService <-> FileView
-  window.ts                AppWindow: shell assembly, GAction wiring, op progress UI
+  pane.ts                  Pane: binds DirectoryService+SearchService <-> FileView (+history/search)
+  tab.ts                   Tab: hosts 1–2 Panes (dual-pane) + active-pane; delegates to it
+  window.ts                AppWindow: shell assembly, GAction wiring, ops queue, conflicts
   main.ts                  Adw.Application, accelerators, GLib.MainLoop lifecycle
 ```
 
@@ -322,7 +346,7 @@ checked-out nautilus source at `../nautilus` as the reference for UI + CSS.
 - **Column chooser / captions** — let the user choose which list columns show
   and grid caption lines. Needs dynamic `Gtk.ColumnViewColumn` visibility.
 - **Editable permissions** in Properties (chmod via `info`/`F.setAttribute`).
-- **Content (full-text) search** — worker only matches names.
+- ~~Content (full-text) search~~ — **done** (ripgrep; see §6c).
 
 ---
 
@@ -388,6 +412,107 @@ implemented yet.
 **Bet:** split view + git awareness + space-to-preview is a combination no
 mainstream Linux file manager ships together. Fastest path to a visible "whoa":
 space-to-preview or git badges.
+
+---
+
+## 6c. Differentiator build (LANDED — verified per §5)
+
+Five of §6b shipped: dual pane, space-to-preview, ripgrep content search, disk
+treemap, conflict resolution + ops queue. Priority was **clean long-term
+architecture, decoupled modules, small files.** All typecheck (`npm run
+typecheck`) and were verified headlessly (GSK PNG renders + service-level tests
+against `/tmp`): dual-pane split/switch/unsplit; Quick Look image+text paging;
+ripgrep content-vs-name matching; copyItems replace/keep-both/recursive/cancel +
+conflict dialog + ops-queue rows; treemap recursive sizing + squarified render.
+Verification harnesses were throwaway `/tmp/h-*.mjs` (per §5).
+
+### Environment de-risking (probed up front)
+
+- **cairo works** under node-gtk: `Gtk.DrawingArea.setDrawFunc(cb)` calls
+  `cb(area, cr, width, height, userData)` (argc 5); cairo path/fill ops work.
+- **cairo toy text API is dead** (`selectFontFace`/`showText`/`textExtents` →
+  blank, zero extents). **Use `PangoCairo`** for text: `createLayout(cr)` +
+  `layout.setText(s, -1)` + `setFontDescription(Pango.FontDescription.fromString(...))`
+  + `PangoCairo.showLayout(cr, layout)` — verified, `getPixelSize()` correct.
+- **ripgrep** `rg` 15.1.0 present at `/usr/bin/rg`.
+
+### Architecture decisions
+
+- **Dual pane — `Pane` extracted from `Tab`.** New `src/pane.ts` owns what `Tab`
+  used to: `FileView` + `DirectoryService` + `SearchService` + `History` +
+  location + search state + all the `view.on*` wiring. `src/tab.ts` becomes a
+  thin container: 1–2 `Pane`s hosted in a `Gtk.Paned` inside an `Adw.Bin`
+  (`this.container`, which is the `Adw.TabPage` child — the page child can't be
+  swapped, so we re-child inside the Bin), tracks `activePane`, and **delegates**
+  `view`/`location`/nav/search/`applyPrefs` getters to it so `window.ts` keeps
+  calling `this.activeTab.*` almost unchanged. A pane becomes active on
+  focus/click/context-menu; `win.toggle-split`/`win.swap-panes` actions added.
+  Pane callbacks (activate/context/drop/preview) activate the pane, then call the
+  existing `win.*(tab, …)` methods.
+- **Space-to-preview.** `FileView` gains an `onPreview` callback fired on Space
+  when the typeahead buffer is empty (replacing the old "leading space no-op").
+  **Gotcha:** the grid/column view claims Space for selection-toggle at the
+  target phase, so the typeahead `EventControllerKey` must run in the **CAPTURE**
+  phase (`setPropagationPhase(CAPTURE)`) to see Space first — otherwise Space just
+  deselects. Keys it doesn't consume (arrows/Enter/Ctrl-chords) return unhandled
+  and propagate to the view as before.
+  `src/ui/preview.ts` = a reusable `QuickLook` (one per window, lazy) hosting a
+  content area + prev/next/close; `src/ui/preview-renderers.ts` = pure
+  `renderPreview(info, file)` per content-type (image→`Gtk.Picture`,
+  text/code→async node-read into monospace `TextView` capped at 512 KB,
+  audio/video→`Gtk.Video`, else metadata card). Navigates within the entries the
+  view is showing.
+- **Ripgrep content search.** `SearchFilter` gains `contents: boolean`.
+  `search-filter.ts` popover gets a "File contents" switch. `search-service.ts`:
+  when `contents && query`, spawn `rg --files-with-matches --fixed-strings
+  --ignore-case [--hidden] --no-ignore -- <q> <dir>` via `ProcessStream` (content
+  mode emits **raw path lines**, name mode stays **JSON** from the worker — the
+  service tracks which and parses accordingly); reuse the async path→`GFileInfo`
+  resolve + the category/date `matchesFilter`. Missing `rg` →
+  `GLib.findProgramInPath` guard → friendly error state.
+- **Conflict resolution + ops queue.** `file-operations.ts` `Job` gains an `id`
+  (all events carry it) + `cancel(id)`; new `copyItems/moveItems(CopyItem[])`
+  where `CopyItem = {src, dest, replace?}` (replace = delete-existing-then-write,
+  so nested copies never re-conflict), returning produced dests; `copy/move`
+  become thin auto-rename wrappers (kept for redo / system-paste). `_paste` /
+  `onDropFiles` become **async**: preflight **top-level** collisions,
+  `src/ui/conflict-dialog.ts` (Replace / Skip / Keep Both + apply-to-all) →
+  build plan → run → record undo from the returned dests. New
+  `src/ui/operations-queue.ts` = a header `MenuButton` (hidden when idle) whose
+  popover lists each active op with a per-op progress bar + cancel ✕, fed by
+  `fileOps` + `archive` events; **replaces** the single bottom progress revealer.
+- **Disk treemap.** New `src/core/disk-usage.ts` = `scanChildren(path, onProgress,
+  isCancelled)` → each top-level child with recursive byte size, reported
+  incrementally, cancellable (pure node fs, like `measure.ts`). New
+  `src/ui/treemap.ts` = `TreemapView` (`Gtk.DrawingArea`; **squarified** layout;
+  cairo rects + PangoCairo labels; hover/click hit-tested against stored rects;
+  click a folder tile → drill down). New `src/ui/disk-usage.ts` = an `Adw`
+  dialog hosting it (path/total header, spinner while scanning, Back). Opened via
+  `win.disk-usage` from the folder + background context menus.
+
+### Scoping / decisions (v1) + follow-ups
+
+- **Conflict resolution** handles **top-level** collisions only (the
+  pasted/dropped items vs the destination); deep directory-merge conflicts are
+  not surfaced — "Replace" of a directory is a true replace (delete-then-copy),
+  not a merge. System-clipboard paste (`_pasteFromSystem`) stays auto-rename (the
+  async clipboard read isn't routed through the dialog).
+- **Treemap** v1 is **single-level** (children of the scanned dir) with
+  click-to-drill; no nested rings. Local paths only (node fs). Redraws on every
+  incremental scan report (fine ≤ few hundred children; throttle if needed).
+- **Preview** renders text/image/av + a metadata fallback; **no** PDF/markdown
+  rendering yet (PDF needs Poppler; markdown treated as text). Text is a bounded
+  512 KB read.
+- **Ops queue** is concurrent (cancel only, no pause/resume), matching the
+  existing time-sliced Job model. cairo toy-text is dead → labels use PangoCairo.
+- **Dual pane** focus-follows-mouse-less: a pane becomes active on focus-in /
+  click / context-menu. Splitting moves focus to the new (right) pane because its
+  initial navigation grabs focus — acceptable; F6 returns. Only explicit
+  navigation grabs focus, so a background FileMonitor refresh won't steal it.
+- **GSK render gotcha:** a `DrawingArea` window can snapshot to a *null* node for
+  a few frames; don't spin a `return true` retry timer (keeps the frame dirty) —
+  wait for the work to finish, then take one delayed snapshot (see the treemap
+  harness).
 
 ---
 

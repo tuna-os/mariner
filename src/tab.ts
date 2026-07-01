@@ -1,136 +1,139 @@
-import { FileView } from './ui/file-view.ts'
-import { DirectoryService } from './services/directory-service.ts'
-import { SearchService } from './services/search-service.ts'
-import { History } from './core/navigation.ts'
+import Gtk from 'gi:Gtk-4.0'
+import Adw from 'gi:Adw-1'
+import { Pane } from './pane.ts'
 import { F } from './core/gio.ts'
 import { locationName } from './core/format.ts'
 import type { AppWindow } from './window.ts'
-import type { Entry, GFile, GFileInfo, ViewConfig, SearchFilter } from './core/types.ts'
+import type { GFile, SearchFilter } from './core/types.ts'
 
-/* Per-tab controller: binds a DirectoryService + SearchService to a FileView,
- * owns navigation history and search state. Holds no widget construction beyond
- * the view it drives. */
+/* Per-tab controller: hosts one or two Panes (dual-pane) in an Adw.Bin that is
+ * the tab page's child. Tracks which pane is active and delegates the browsing
+ * surface (view / location / navigation / search) to it, so the window keeps
+ * driving `activeTab.*` largely unchanged. When split, panes sit in a Gtk.Paned;
+ * unsplit, the single pane fills the Bin directly. */
 export class Tab {
   win: AppWindow
-  view: FileView
-  dir: DirectoryService
-  search: SearchService
-  history: History
-  location: GFile | null = null
-  searching = false
-  searchQuery = ''
-  searchFilter: SearchFilter = { category: 'all', since: 0 }
+  container: any
+  paned: any = null
+  panes: Pane[] = []
+  activePane!: Pane
   page: any
 
   constructor(win: AppWindow, file: GFile) {
     this.win = win
-    this.view = new FileView()
-    this.view.onActivate = (info, f) => win.onItemActivated(this, info, f)
-    this.view.onContextMenu = (w, x, y, target) => win.showContextMenu(this, w, x, y, target)
-    this.view.onDropFiles = (files, targetDir) => win.onDropFiles(this, files, targetDir)
-    this.view.isCutFile = f => win._cutUris.has(F.getUri(f))
+    this.container = new Adw.Bin()
+    this.page = win.tabView.append(this.container)
 
-    this.dir = new DirectoryService()
-    this.search = new SearchService()
-    this.history = new History()
-
-    this._wire()
-    this.page = win.tabView.append(this.view.widget)
-    this.navigate(file, false)
+    const pane = this._makePane()
+    this.panes = [pane]
+    this.activePane = pane
+    this.container.setChild(pane.widget)
+    pane.navigate(file, false)
   }
 
-  get canGoBack(): boolean { return this.history.canGoBack }
-  get canGoForward(): boolean { return this.history.canGoForward }
-  get parent(): GFile | null { return F.getParent(this.location) }
-  get searchActive(): boolean { return !!this.searchQuery || this.searchFilter.category !== 'all' || this.searchFilter.since > 0 }
-  get isShowingSearch(): boolean { return this.searching && this.searchActive }
+  /* ---- delegation to the active pane ---- */
+  get view(): any { return this.activePane.view }
+  get location(): GFile | null { return this.activePane.location }
+  get canGoBack(): boolean { return this.activePane.canGoBack }
+  get canGoForward(): boolean { return this.activePane.canGoForward }
+  get parent(): GFile | null { return this.activePane.parent }
+  get isShowingSearch(): boolean { return this.activePane.isShowingSearch }
+  get isSplit(): boolean { return this.panes.length > 1 }
 
-  _wire(): void {
-    this.dir.on('loading', () => { this.view.configure(this._dirConfig()); this.view.beginLoading() })
-    this.dir.on('items', (batch: GFileInfo[]) => this.view.addEntries(
-      batch.map((info): Entry => ({ info, file: F.getChild(this.location, info.getName()) }))))
-    this.dir.on('ready', () => this.view.finishLoading('folder'))
-    this.dir.on('error', (msg: string) => this.view.showError(msg))
-    this.dir.on('invalidated', () => { if (!this.isShowingSearch) this.dir.load(this.location) })
+  navigate(file: GFile, push = true): void { this.activePane.navigate(file, push) }
+  back(): void { this.activePane.back() }
+  forward(): void { this.activePane.forward() }
+  up(): void { this.activePane.up() }
+  reload(): void { this.activePane.reload() }
 
-    this.search.on('start', () => { this.view.configure(this._searchConfig()); this.view.beginLoading() })
-    this.search.on('result', (pair: Entry) => this.view.addEntries([pair]))
-    this.search.on('end', () => { if (this.isShowingSearch) this.view.finishLoading('search') })
-    this.search.on('error', (msg: string) => this.view.showError(msg))
-  }
+  beginSearch(): void { this.activePane.beginSearch() }
+  setSearchQuery(q: string): void { this.activePane.setSearchQuery(q) }
+  setSearchFilter(f: SearchFilter): void { this.activePane.setSearchFilter(f) }
+  endSearch(): void { this.activePane.endSearch() }
 
-  _dirConfig(): ViewConfig {
-    const p = this.win.prefs
-    return {
-      sortKey: p.sortKey, sortDesc: p.sortDesc,
-      filter: p.showHidden ? null : (info: GFileInfo) => !info.getIsHidden() && !info.getIsBackup(),
+  /* Prefs (view mode, sort, hidden, zoom) are global — apply to every pane. */
+  applyPrefs(): void { for (const p of this.panes) p.applyPrefs() }
+
+  /* ---- pane lifecycle / wiring ---- */
+  _makePane(): Pane {
+    const pane = new Pane(this.win.prefs)
+    pane.onActivate = (info, f) => { this.setActivePane(pane); this.win.onItemActivated(this, info, f) }
+    pane.onContextMenu = (w, x, y, target) => { this.setActivePane(pane); this.win.showContextMenu(this, w, x, y, target) }
+    pane.onDropFiles = (files, targetDir) => { this.setActivePane(pane); this.win.onDropFiles(this, files, targetDir) }
+    pane.onPreview = () => { this.setActivePane(pane); this.win.togglePreview(this) }
+    pane.onFocused = () => this.setActivePane(pane)
+    pane.isCutFile = f => this.win._cutUris.has(F.getUri(f))
+    pane.onChanged = () => {
+      pane.syncView()
+      if (pane === this.activePane) { this.page.setTitle(locationName(pane.location)); this.win.onTabChanged(this) }
     }
-  }
-  _searchConfig(): ViewConfig {
-    const p = this.win.prefs
-    return { sortKey: p.sortKey, sortDesc: p.sortDesc, filter: null }
+    return pane
   }
 
-  /* ---- navigation ---- */
-  navigate(file: GFile, push = true): void {
-    this._exitSearch()
-    if (push && this.location) this.history.visit(this.location)
-    this.location = file
-    this.view.prepareForNavigation()
-    this.dir.load(file)
-    this._afterChange()
-  }
-
-  back(): void { this._go(this.history.goBack(this.location)) }
-  forward(): void { this._go(this.history.goForward(this.location)) }
-  up(): void { const p = this.parent; if (p) this.navigate(p) }
-  reload(): void { this.isShowingSearch ? this._runSearch() : this.dir.load(this.location) }
-
-  _go(file: GFile | null): void {
-    if (!file) return
-    this._exitSearch()
-    this.location = file
-    this.view.prepareForNavigation()
-    this.dir.load(file)
-    this._afterChange()
-  }
-
-  /* ---- search ---- */
-  beginSearch(): void { this.searching = true; this.searchQuery = ''; this._runSearch() }
-  setSearchQuery(q: string): void { if (!this.searching) return; this.searchQuery = q; this._runSearch() }
-  setSearchFilter(f: SearchFilter): void { this.searchFilter = f; if (this.searching) this._runSearch() }
-  endSearch(): void { if (!this.searching) return; this._exitSearch(); this.dir.load(this.location) }
-
-  _exitSearch(): void { this.searching = false; this.searchQuery = ''; this.search.cancel() }
-
-  _runSearch(): void {
-    if (this.searchActive) {
-      this.dir.cancel()
-      this.search.search(this.location, this.searchQuery, { showHidden: this.win.prefs.showHidden, filter: this.searchFilter })
-    } else {
-      this.search.cancel()
-      this.dir.load(this.location)   /* empty query + no filter → show the current folder */
-    }
-  }
-
-  /* ---- prefs ---- */
-  applyPrefs(): void {
-    this.view.setMode(this.win.prefs.viewMode)
-    this.view.setZoom(this.win.prefs.iconSize)
-    if (this.isShowingSearch) {
-      this._runSearch()
-    } else {
-      this.view.configure(this._dirConfig())
-      this.view.rebuild()
-    }
-  }
-
-  _afterChange(): void {
-    this.view.setMode(this.win.prefs.viewMode)
-    this.view.setZoom(this.win.prefs.iconSize)
-    this.page.setTitle(locationName(this.location))
+  setActivePane(pane: Pane): void {
+    if (pane === this.activePane) return
+    this.activePane = pane
+    this._updatePaneChrome()
     this.win.onTabChanged(this)
   }
 
-  destroy(): void { this.dir.cancel(); this.search.cancel() }
+  /* Highlight the active pane when split (a subtle frame), so it's obvious which
+   * side keyboard/toolbar actions target. */
+  _updatePaneChrome(): void {
+    if (!this.isSplit) return
+    for (const p of this.panes) p.widget.removeCssClass('active-pane')
+    this.activePane.widget.addCssClass('active-pane')
+  }
+
+  /* ---- split ---- */
+  toggleSplit(): void { this.isSplit ? this._unsplit() : this._split() }
+
+  _split(): void {
+    if (this.isSplit) return
+    const start = this.activePane
+    const other = this._makePane()
+    this.panes = [start, other]
+    /* Re-child: the surviving pane widget must be unparented from the Bin before
+     * it can join the Paned. */
+    this.container.setChild(null)
+    this.paned = new Gtk.Paned({ orientation: Gtk.Orientation.HORIZONTAL, wideHandle: true })
+    this.paned.setStartChild(start.widget)
+    this.paned.setEndChild(other.widget)
+    this.paned.setResizeStartChild(true)
+    this.paned.setResizeEndChild(true)
+    this.container.setChild(this.paned)
+    /* Centre the divider once, on the first allocation (max-position notifies
+     * when the paned is sized). Later resizes keep the user's chosen split. */
+    let centred = false
+    this.paned.on('notify::max-position', () => {
+      if (centred || !this.paned) return
+      const w = this.paned.getWidth()
+      if (w > 1) { this.paned.setPosition(Math.floor(w / 2)); centred = true }
+    })
+    other.navigate(start.location!, false)
+    this._updatePaneChrome()
+  }
+
+  _unsplit(): void {
+    if (!this.isSplit) return
+    const keep = this.activePane
+    const drop = this.panes.find(p => p !== keep)!
+    this.paned.setStartChild(null)
+    this.paned.setEndChild(null)
+    this.container.setChild(keep.widget)
+    keep.widget.removeCssClass('active-pane')
+    this.paned = null
+    this.panes = [keep]
+    drop.destroy()
+    keep.syncView()
+  }
+
+  /* Move focus/active to the other pane (F6). */
+  focusOtherPane(): void {
+    if (!this.isSplit) return
+    const other = this.panes.find(p => p !== this.activePane)
+    if (other) { this.setActivePane(other); other.view.widget.grabFocus() }
+  }
+
+  destroy(): void { for (const p of this.panes) p.destroy() }
 }

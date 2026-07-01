@@ -10,6 +10,8 @@ export const ACCELS: Record<string, string[]> = {
   'win.reload': ['<ctrl>r', 'F5'],
   'win.new-tab': ['<ctrl>t'],
   'win.new-window': ['<ctrl>n'],
+  'win.toggle-split': ['F3'],
+  'win.focus-other-pane': ['F6'],
   'win.close-tab': ['<ctrl>w'],
   'win.tab-prev': ['<ctrl>Page_Up'],
   'win.tab-next': ['<ctrl>Page_Down'],

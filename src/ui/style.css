@@ -144,3 +144,17 @@
 .view .hidden-file {
   opacity: 0.55;
 }
+
+/* ---- Dual-pane ---- */
+/* Mark the focused pane when split so it's clear which side actions target. */
+.active-pane {
+  box-shadow: inset 0 0 0 2px alpha(currentColor, 0.28);
+}
+
+/* ---- Quick Look (preview) ---- */
+.quicklook-content {
+  background: @window_bg_color;
+}
+.quicklook-content .preview-image {
+  margin: 12px;
+}

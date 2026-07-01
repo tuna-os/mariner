@@ -31,6 +31,8 @@ export class FileView {
   onActivate: ActivateHandler = () => {}
   onContextMenu: ContextMenuHandler = () => {}
   onDropFiles: (files: GFile[], targetDir?: GFile) => void = () => {}
+  onPreview: () => void = () => {}
+  onFocusIn: () => void = () => {}
   isCutFile: (file: GFile) => boolean = () => false
 
   gridView: any
@@ -100,6 +102,12 @@ export class FileView {
 
     /* Accept files dropped from other apps (or this one) into the current view. */
     this.overlay.addController(makeDropTarget(files => this.onDropFiles(files)))
+
+    /* Report focus entering this view's subtree, so a dual-pane container can
+     * mark this pane active. */
+    const focus = new Gtk.EventControllerFocus()
+    focus.on('enter', () => this.onFocusIn())
+    this.overlay.addController(focus)
   }
 
   get widget(): any { return this.overlay }
@@ -199,6 +207,30 @@ export class FileView {
       }
     }
     return out
+  }
+
+  /* All currently-displayed entries in view order (for the preview to page
+   * through), and the index of the first selected one (0 if none). */
+  entries(): Entry[] {
+    const out: Entry[] = []
+    const n = this.store.getNItems()
+    for (let i = 0; i < n; i++) { const info = this.store.getItem(i); out.push({ info, file: info._file }) }
+    return out
+  }
+
+  selectedIndex(): number {
+    const n = this.store.getNItems()
+    for (let i = 0; i < n; i++) if (this.selection.isSelected(i)) return i
+    return 0
+  }
+
+  /* Select + scroll to a row by index (used to keep the view in sync with the
+   * preview as it pages through entries). */
+  selectIndex(i: number): void {
+    if (i < 0 || i >= this.store.getNItems()) return
+    this.selection.selectItem(i, true)
+    const view = this.viewStack.getVisibleChildName() === 'list' ? this.columnView : this.gridView
+    view.scrollTo(i, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT, null)
   }
 
   /* Re-run the cell factories to reflect state that isn't in the model (e.g. the
@@ -305,6 +337,12 @@ export class FileView {
    * whose name matches; the buffer resets after a short idle. */
   _installTypeahead(view: any): void {
     const controller = new Gtk.EventControllerKey()
+    /* CAPTURE phase: intercept keys before the grid/column view's built-in
+     * keynav. Space in particular is claimed by the view for selection-toggle at
+     * the target phase, so a bubble-phase handler never sees it (Space→preview
+     * would just deselect). Keys we don't consume (arrows/Enter/Ctrl chords) are
+     * returned unhandled and propagate to the view as usual. */
+    controller.setPropagationPhase(Gtk.PropagationPhase.CAPTURE)
     controller.on('key-pressed', (...a: any[]) => this._onTypeaheadKey(view, a[0], a[2]))
     view.addController(controller)
   }
@@ -325,7 +363,8 @@ export class FileView {
     const ch = Gdk.keyvalToUnicode(keyval)
     if (!ch || ch < 0x20 || ch === 0x7f) return false   /* not a printable char (0x7f = Delete) */
     const s = String.fromCodePoint(ch)
-    if (!this._typeahead && s === ' ') return false   /* leading space is a no-op */
+    /* Space with no active typeahead opens the preview (Quick Look), like nautilus. */
+    if (!this._typeahead && s === ' ') { this.onPreview(); return true }
     this._typeahead += s
     this._armTypeaheadTimer()
     this._syncTypeaheadBar()

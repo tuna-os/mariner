@@ -9,3 +9,4 @@ declare module 'gi:GObject-2.0' { const GObject: any; export default GObject }
 declare module 'gi:Gdk-4.0' { const Gdk: any; export default Gdk }
 declare module 'gi:GdkPixbuf-2.0' { const GdkPixbuf: any; export default GdkPixbuf }
 declare module 'gi:Pango-1.0' { const Pango: any; export default Pango }
+declare module 'gi:PangoCairo-1.0' { const PangoCairo: any; export default PangoCairo }

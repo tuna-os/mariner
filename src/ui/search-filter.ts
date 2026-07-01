@@ -21,13 +21,16 @@ export interface SearchFilterButton {
  * modification window, mirroring nautilus's search popover ("What"/"When").
  * Reports the new filter via onChange whenever a dropdown changes. */
 export function createSearchFilterButton(onChange: (f: SearchFilter) => void): SearchFilterButton {
-  const filter: SearchFilter = { category: 'all', since: 0 }
+  const filter: SearchFilter = { category: 'all', since: 0, contents: false }
 
   const grid = new Gtk.Grid({ rowSpacing: 8, columnSpacing: 12, marginTop: 12, marginBottom: 12, marginStart: 12, marginEnd: 12 })
   const kind = dropdown(CATEGORIES.map(c => c[0]), i => { filter.category = CATEGORIES[i][1]; onChange({ ...filter }) })
   const when = dropdown(WHEN.map(w => w[0]), i => { filter.since = sinceFor(WHEN[i][1]); onChange({ ...filter }) })
+  const contents = new Gtk.Switch({ halign: Gtk.Align.START, valign: Gtk.Align.CENTER })
+  contents.on('notify::active', () => { filter.contents = contents.getActive(); onChange({ ...filter }) })
   grid.attach(label('What'), 0, 0, 1, 1); grid.attach(kind, 1, 0, 1, 1)
   grid.attach(label('When'), 0, 1, 1, 1); grid.attach(when, 1, 1, 1, 1)
+  grid.attach(label('Contents'), 0, 2, 1, 1); grid.attach(contents, 1, 2, 1, 1)
 
   const popover = new Gtk.Popover()
   popover.setChild(grid)
@@ -35,7 +38,7 @@ export function createSearchFilterButton(onChange: (f: SearchFilter) => void): S
 
   return {
     widget, filter,
-    reset: () => { filter.category = 'all'; filter.since = 0; kind.setSelected(0); when.setSelected(0) },
+    reset: () => { filter.category = 'all'; filter.since = 0; filter.contents = false; kind.setSelected(0); when.setSelected(0); contents.setActive(false) },
   }
 }
 

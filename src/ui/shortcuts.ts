@@ -17,6 +17,7 @@ const SECTIONS: Section[] = [
     ['Delete Permanently', '<Shift>Delete'],
     ['Create Link', '<Primary>m'],
     ['Show Item Properties', '<Primary>i <Alt>Return'],
+    ['Preview (Quick Look)', 'space'],
     ['Open Context Menu', '<Shift>F10'],
   ] },
   { title: 'Edit', items: [
@@ -56,6 +57,8 @@ const SECTIONS: Section[] = [
     ['Close Window or Tab', '<Primary>w'],
     ['Go to Previous Tab', '<Primary>Page_Up'],
     ['Go to Next Tab', '<Primary>Page_Down'],
+    ['Toggle Split View', 'F3'],
+    ['Focus Other Pane', 'F6'],
   ] },
   { title: 'App', items: [
     ['Keyboard Shortcuts', '<Primary>question'],

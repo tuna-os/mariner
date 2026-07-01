@@ -1,0 +1,146 @@
+import { FileView } from './ui/file-view.ts'
+import { DirectoryService } from './services/directory-service.ts'
+import { SearchService } from './services/search-service.ts'
+import { History } from './core/navigation.ts'
+import { F } from './core/gio.ts'
+import type { Entry, GFile, GFileInfo, Prefs, ViewConfig, SearchFilter } from './core/types.ts'
+
+/* A single browsing pane: binds a DirectoryService + SearchService to one
+ * FileView, owns its navigation history and search state. Decoupled from the
+ * window and tab — it reads global `prefs` (mutated in place elsewhere) and
+ * routes user intents through injected callbacks the container wires up. A Tab
+ * hosts one or two of these (dual-pane). */
+export class Pane {
+  prefs: Prefs
+  view: FileView
+  dir: DirectoryService
+  search: SearchService
+  history: History
+  location: GFile | null = null
+  searching = false
+  searchQuery = ''
+  searchFilter: SearchFilter = { category: 'all', since: 0, contents: false }
+
+  /* Injected by the container (Tab). Defaults are inert. */
+  onActivate: (info: GFileInfo, file: GFile) => void = () => {}
+  onContextMenu: (widget: any, x: number, y: number, target: Entry | null) => void = () => {}
+  onDropFiles: (files: GFile[], targetDir?: GFile) => void = () => {}
+  onPreview: () => void = () => {}
+  onFocused: () => void = () => {}
+  onChanged: () => void = () => {}
+  isCutFile: (file: GFile) => boolean = () => false
+
+  /* The initial navigation is deferred to `navigate()` so the container can wire
+   * callbacks (onChanged/onActivate/…) before the first load fires them. */
+  constructor(prefs: Prefs) {
+    this.prefs = prefs
+    this.view = new FileView()
+    this.view.onActivate = (info, f) => this.onActivate(info, f)
+    this.view.onContextMenu = (w, x, y, target) => this.onContextMenu(w, x, y, target)
+    this.view.onDropFiles = (files, targetDir) => this.onDropFiles(files, targetDir)
+    this.view.onPreview = () => this.onPreview()
+    this.view.onFocusIn = () => this.onFocused()
+    this.view.isCutFile = f => this.isCutFile(f)
+
+    this.dir = new DirectoryService()
+    this.search = new SearchService()
+    this.history = new History()
+
+    this._wire()
+  }
+
+  get widget(): any { return this.view.widget }
+  get canGoBack(): boolean { return this.history.canGoBack }
+  get canGoForward(): boolean { return this.history.canGoForward }
+  get parent(): GFile | null { return F.getParent(this.location) }
+  get searchActive(): boolean { return !!this.searchQuery || this.searchFilter.category !== 'all' || this.searchFilter.since > 0 }
+  get isShowingSearch(): boolean { return this.searching && this.searchActive }
+
+  _wire(): void {
+    this.dir.on('loading', () => { this.view.configure(this._dirConfig()); this.view.beginLoading() })
+    this.dir.on('items', (batch: GFileInfo[]) => this.view.addEntries(
+      batch.map((info): Entry => ({ info, file: F.getChild(this.location, info.getName()) }))))
+    this.dir.on('ready', () => this.view.finishLoading('folder'))
+    this.dir.on('error', (msg: string) => this.view.showError(msg))
+    this.dir.on('invalidated', () => { if (!this.isShowingSearch) this.dir.load(this.location) })
+
+    this.search.on('start', () => { this.view.configure(this._searchConfig()); this.view.beginLoading() })
+    this.search.on('result', (pair: Entry) => this.view.addEntries([pair]))
+    this.search.on('end', () => { if (this.isShowingSearch) this.view.finishLoading('search') })
+    this.search.on('error', (msg: string) => this.view.showError(msg))
+  }
+
+  _dirConfig(): ViewConfig {
+    const p = this.prefs
+    return {
+      sortKey: p.sortKey, sortDesc: p.sortDesc,
+      filter: p.showHidden ? null : (info: GFileInfo) => !info.getIsHidden() && !info.getIsBackup(),
+    }
+  }
+  _searchConfig(): ViewConfig {
+    const p = this.prefs
+    return { sortKey: p.sortKey, sortDesc: p.sortDesc, filter: null }
+  }
+
+  /* ---- navigation ---- */
+  navigate(file: GFile, push = true): void {
+    this._exitSearch()
+    if (push && this.location) this.history.visit(this.location)
+    this.location = file
+    this.view.prepareForNavigation()
+    this.dir.load(file)
+    this.onChanged()
+  }
+
+  back(): void { this._go(this.history.goBack(this.location)) }
+  forward(): void { this._go(this.history.goForward(this.location)) }
+  up(): void { const p = this.parent; if (p) this.navigate(p) }
+  reload(): void { this.isShowingSearch ? this._runSearch() : this.dir.load(this.location) }
+
+  _go(file: GFile | null): void {
+    if (!file) return
+    this._exitSearch()
+    this.location = file
+    this.view.prepareForNavigation()
+    this.dir.load(file)
+    this.onChanged()
+  }
+
+  /* ---- search ---- */
+  beginSearch(): void { this.searching = true; this.searchQuery = ''; this._runSearch() }
+  setSearchQuery(q: string): void { if (!this.searching) return; this.searchQuery = q; this._runSearch() }
+  setSearchFilter(f: SearchFilter): void { this.searchFilter = f; if (this.searching) this._runSearch() }
+  endSearch(): void { if (!this.searching) return; this._exitSearch(); this.dir.load(this.location) }
+
+  _exitSearch(): void { this.searching = false; this.searchQuery = ''; this.search.cancel() }
+
+  _runSearch(): void {
+    if (this.searchActive) {
+      this.dir.cancel()
+      this.search.search(this.location, this.searchQuery, { showHidden: this.prefs.showHidden, filter: this.searchFilter })
+    } else {
+      this.search.cancel()
+      this.dir.load(this.location)   /* empty query + no filter → show the current folder */
+    }
+  }
+
+  /* ---- prefs ---- */
+  applyPrefs(): void {
+    this.view.setMode(this.prefs.viewMode)
+    this.view.setZoom(this.prefs.iconSize)
+    if (this.isShowingSearch) {
+      this._runSearch()
+    } else {
+      this.view.configure(this._dirConfig())
+      this.view.rebuild()
+    }
+  }
+
+  /* Re-apply view mode + zoom (called after navigation / when made active). */
+  syncView(): void {
+    this.view.setMode(this.prefs.viewMode)
+    this.view.setZoom(this.prefs.iconSize)
+  }
+
+  destroy(): void { this.dir.cancel(); this.search.cancel() }
+}

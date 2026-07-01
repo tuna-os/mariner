@@ -28,6 +28,7 @@ export function buildContextMenu({ target, inTrash, clipboardEmpty }: MenuContex
     const isDir = isDirectory(target.info)
     const isImage = (target.info.getContentType() || '').startsWith('image/')
     section(['Open', 'win.open'], isDir ? ['Open in New Tab', 'win.open-new-tab'] : ['Open With…', 'win.open-with'])
+    section(['Preview', 'win.preview'])
 
     const edit: Array<[string, string]> = [['Cut', 'win.cut'], ['Copy', 'win.copy']]
     if (isDir && !clipboardEmpty) edit.push(['Paste Into Folder', 'win.paste'])
@@ -40,6 +41,7 @@ export function buildContextMenu({ target, inTrash, clipboardEmpty }: MenuContex
     if (isArchive(displayName(target.info))) arc.push(['Extract Here', 'win.extract-here'])
     arc.push(['Compress…', 'win.compress'])
     if (isImage) arc.push(['Set as Wallpaper', 'win.set-wallpaper'])
+    if (isDir) arc.push(['Analyze Disk Usage', 'win.disk-usage'])
     section(...arc)
 
     section(['Properties', 'win.properties'])
@@ -51,7 +53,7 @@ export function buildContextMenu({ target, inTrash, clipboardEmpty }: MenuContex
     if (!clipboardEmpty) bg.push(['Paste', 'win.paste'])
     bg.push(['Select All', 'win.select-all'])
     section(...bg)
-    section(['Open in Terminal', 'win.open-terminal'])
+    section(['Open in Terminal', 'win.open-terminal'], ['Analyze Disk Usage', 'win.disk-usage'])
   }
   return menu
 }

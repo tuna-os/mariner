@@ -9,9 +9,12 @@ const ARCHIVE_RE = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2?|tar\.xz|txz|tar\.zst|7
 
 export function isArchive(name: string): boolean { return ARCHIVE_RE.test(name) }
 
+let nextArchiveId = 0
+
 /* Extract/compress by shelling out to standard CLI tools via ProcessStream
  * (streams to completion; nautilus uses libarchive/gnome-autoar). GTK-free.
- * Events: 'begin' {title}, 'done' {title}, 'error' {title, message}. */
+ * Speaks the same op protocol as FileOperations (with an `id`, no byte-level
+ * progress): 'begin' {id,title}, 'done' {id,title}, 'error' {id,title,message}. */
 export class ArchiveService extends EventEmitter {
   extract(archive: GFile, destDir: GFile): void {
     const path = F.getPath(archive)
@@ -32,10 +35,11 @@ export class ArchiveService extends EventEmitter {
   }
 
   _run(title: string, argv: string[], cwd?: string): void {
-    this.emit('begin', { title })
+    const id = ++nextArchiveId
+    this.emit('begin', { id, title })
     const stream = new ProcessStream(argv, cwd ? { cwd } : {})
-    stream.on('error', (message: string) => this.emit('error', { title, message }))
-    stream.on('end', (ok: boolean) => { if (ok) this.emit('done', { title }) })
+    stream.on('error', (message: string) => this.emit('error', { id, title, message }))
+    stream.on('end', (ok: boolean) => { if (ok) this.emit('done', { id, title }) })
     stream.start()
   }
 

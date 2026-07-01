@@ -2,19 +2,22 @@ import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
 import { EventEmitter } from '../core/emitter.ts'
 import { F } from '../core/gio.ts'
-import type { GFile } from '../core/types.ts'
+import type { CopyItem, GFile } from '../core/types.ts'
 
 const NONE = Gio.FileCopyFlags.NONE
 const NOFOLLOW = Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS
 const TIME_SLICE_MS = 8
+
+let nextJobId = 0
 
 type Step = () => void
 
 function fileType(file: GFile): any { return F.queryFileType(file, NOFOLLOW, null) }
 function isDir(file: GFile): boolean { return fileType(file) === Gio.FileType.DIRECTORY }
 
-/* A non-colliding child name in destDir. */
-function uniqueChild(destDir: GFile, name: string): GFile {
+/* A non-colliding child name in destDir (auto-rename, e.g. "file (copy).txt").
+ * Exported so the conflict-resolution path can build "Keep Both" destinations. */
+export function uniqueChild(destDir: GFile, name: string): GFile {
   let child = F.getChild(destDir, name)
   if (!F.queryExists(child, null)) return child
   const dot = name.lastIndexOf('.')
@@ -27,36 +30,52 @@ function uniqueChild(destDir: GFile, name: string): GFile {
 }
 
 /* A time-sliced, self-expanding job: directory steps enqueue child steps, so
- * discovery and execution interleave on the idle loop and the UI never blocks. */
+ * discovery and execution interleave on the idle loop and the UI never blocks.
+ * Each job has an id so the operations queue can track + cancel it. */
 class Job {
+  id = ++nextJobId
   title: string
   service: FileOperations
   stack: Step[] = []
   done = 0
   discovered = 0
+  cancelled = false
 
   constructor(title: string, service: FileOperations) {
     this.title = title
     this.service = service
   }
 
+  cancel(): void { this.cancelled = true }
+
   push(step: Step): void { this.stack.push(step); this.discovered++ }
 
   run(): void {
-    this.service.emit('begin', { title: this.title })
+    this.service._register(this)
+    this.service.emit('begin', { id: this.id, title: this.title })
     GLib.idleAdd(GLib.PRIORITY_DEFAULT_IDLE, () => {
+      if (this.cancelled) { this._finish(); return false }
       const t0 = Number(GLib.getMonotonicTime())   /* getMonotonicTime returns a BigInt */
-      while (this.stack.length && (Number(GLib.getMonotonicTime()) - t0) / 1000 < TIME_SLICE_MS) {
+      while (this.stack.length && !this.cancelled && (Number(GLib.getMonotonicTime()) - t0) / 1000 < TIME_SLICE_MS) {
         const step = this.stack.pop()!
         try { step() }
-        catch (e: any) { this.service.emit('error', { title: this.title, message: e.message }); return false }
+        catch (e: any) {
+          this.service._unregister(this)
+          this.service.emit('error', { id: this.id, title: this.title, message: e.message })
+          return false
+        }
         this.done++
       }
-      this.service.emit('progress', { title: this.title, done: this.done, total: this.discovered })
-      if (this.stack.length) return true
-      this.service.emit('done', { title: this.title, count: this.done })
+      this.service.emit('progress', { id: this.id, title: this.title, done: this.done, total: this.discovered })
+      if (this.stack.length && !this.cancelled) return true
+      this._finish()
       return false
     })
+  }
+
+  _finish(): void {
+    this.service._unregister(this)
+    this.service.emit('done', { id: this.id, title: this.title, count: this.done, cancelled: this.cancelled })
   }
 
   copyStep(src: GFile, dest: GFile): Step {
@@ -102,27 +121,50 @@ class Job {
 }
 
 /* Asynchronous file operations with progress.
- * Long ops (copy/move/delete/empty-trash) emit: 'begin' {title},
- * 'progress' {title,done,total}, 'done' {title,count}. Quick ops (trash/rename/
- * new-folder/link) emit 'notify' {message} instead. Both emit 'error'
- * {title,message} on failure. */
+ * Long ops (copy/move/delete/empty-trash) emit: 'begin' {id,title},
+ * 'progress' {id,title,done,total}, 'done' {id,title,count,cancelled}. Quick ops
+ * (trash/rename/new-folder/link) emit 'notify' {message} instead. Both emit
+ * 'error' {id?,title,message} on failure. `cancel(id)` stops a long op. */
 export class FileOperations extends EventEmitter {
-  /* copy/move return the destination GFiles (collision-resolved up front) so the
-   * caller can record a precise inverse for undo. */
-  copy(files: GFile[], destDir: GFile): GFile[] {
-    const dests = files.map(f => uniqueChild(destDir, F.getBasename(f)))
-    const job = new Job(`Copying ${files.length} item${files.length > 1 ? 's' : ''}`, this)
-    files.forEach((f, i) => job.push(job.copyStep(f, dests[i])))
+  _jobs = new Map<number, Job>()
+
+  _register(job: Job): void { this._jobs.set(job.id, job) }
+  _unregister(job: Job): void { this._jobs.delete(job.id) }
+  /* Request cancellation of an in-flight long operation by id. */
+  cancel(id: number): void { this._jobs.get(id)?.cancel() }
+
+  /* Run an explicit copy/move plan (destinations already collision-resolved) and
+   * return those destinations so the caller can record a precise undo. `replace`
+   * items delete the existing destination first, so nested copies never
+   * re-conflict. */
+  copyItems(items: CopyItem[]): GFile[] {
+    const job = new Job(`Copying ${items.length} item${items.length > 1 ? 's' : ''}`, this)
+    for (const it of items) {
+      job.push(job.copyStep(it.src, it.dest))
+      if (it.replace && F.queryExists(it.dest, null)) job.push(job.deleteStep(it.dest))
+    }
     job.run()
-    return dests
+    return items.map(i => i.dest)
+  }
+
+  moveItems(items: CopyItem[]): GFile[] {
+    const job = new Job(`Moving ${items.length} item${items.length > 1 ? 's' : ''}`, this)
+    for (const it of items) {
+      job.push(job.moveStep(it.src, it.dest))
+      if (it.replace && F.queryExists(it.dest, null)) job.push(job.deleteStep(it.dest))
+    }
+    job.run()
+    return items.map(i => i.dest)
+  }
+
+  /* Auto-rename wrappers (no conflict prompt) for callers without a resolved
+   * plan: system-clipboard paste, undo/redo re-runs. */
+  copy(files: GFile[], destDir: GFile): GFile[] {
+    return this.copyItems(files.map(f => ({ src: f, dest: uniqueChild(destDir, F.getBasename(f)) })))
   }
 
   move(files: GFile[], destDir: GFile): GFile[] {
-    const dests = files.map(f => uniqueChild(destDir, F.getBasename(f)))
-    const job = new Job(`Moving ${files.length} item${files.length > 1 ? 's' : ''}`, this)
-    files.forEach((f, i) => job.push(job.moveStep(f, dests[i])))
-    job.run()
-    return dests
+    return this.moveItems(files.map(f => ({ src: f, dest: uniqueChild(destDir, F.getBasename(f)) })))
   }
 
   deletePermanently(files: GFile[]): void {

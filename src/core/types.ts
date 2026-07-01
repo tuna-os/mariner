@@ -29,6 +29,9 @@ export type SearchCategory = 'all' | 'folder' | 'document' | 'image' | 'audio' |
 export interface SearchFilter {
   category: SearchCategory
   since: number
+  /* When true (and a query is present), search file *contents* via ripgrep
+   * instead of matching names. */
+  contents?: boolean
 }
 
 export interface Prefs {
@@ -46,8 +49,19 @@ export interface ViewConfig {
   filter: ((info: GFileInfo) => boolean) | null
 }
 
-/* File-operation feedback payloads. */
-export interface OpProgress { title: string; done: number; total: number }
-export interface OpDone { title: string; count: number }
-export interface OpError { title: string; message: string }
+/* One planned copy/move: a source and its (already collision-resolved)
+ * destination. `replace` overwrites an existing destination (delete-then-write);
+ * otherwise the destination is assumed free (auto-renamed or user-confirmed). */
+export interface CopyItem {
+  src: GFile
+  dest: GFile
+  replace?: boolean
+}
+
+/* File-operation feedback payloads. Long ops carry an `id` so a concurrent
+ * operations queue can track and cancel each independently. */
+export interface OpBegin { id: number; title: string }
+export interface OpProgress { id: number; title: string; done: number; total: number }
+export interface OpDone { id: number; title: string; count: number; cancelled: boolean }
+export interface OpError { id?: number; title: string; message: string }
 export interface OpNotify { message: string }

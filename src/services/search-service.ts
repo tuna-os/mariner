@@ -26,20 +26,30 @@ function matchesFilter(info: GFileInfo, filter: SearchFilter | null): boolean {
 
 const WORKER = fileURLToPath(new URL('../workers/search-worker.ts', import.meta.url))
 
-/* Recursive search, run out-of-process (search-worker.mjs) and streamed back so
- * results appear incrementally and a long search never blocks the UI. The worker
- * emits paths; we query each one's GFileInfo (for icon/metadata) asynchronously.
+/* ripgrep flags for content search: emit each matching file once, treat the
+ * query as a literal case-insensitive substring (mirroring the name search),
+ * search everything the user can see (--no-ignore), and keep stderr clean
+ * (--no-messages) since ProcessStream treats any stderr as an error. */
+const RG_FLAGS = ['--files-with-matches', '--fixed-strings', '--ignore-case', '--no-messages', '--no-ignore']
+
+/* Recursive search, run out-of-process and streamed back so results appear
+ * incrementally and a long search never blocks the UI. Two modes:
+ *  - name (default): the breadth-first worker, emitting JSON-encoded paths.
+ *  - content (filter.contents + a query): ripgrep, emitting raw paths.
+ * Either way each path is resolved to a GFileInfo (icon/metadata) asynchronously
+ * and passed through the category/date filter.
  *
  * Events:
  *   'start'                      search began
  *   'result'  ({info, file})     a match resolved
- *   'end'     (ok)               worker finished (ok=false if it errored)
+ *   'end'     (ok)               finished (ok=false if it errored)
  *   'error'   (message)          worker/spawn error
  */
 export class SearchService extends EventEmitter {
   stream: ProcessStream | null = null
   cancellable: any = null
   filter: SearchFilter | null = null
+  _contentMode = false
 
   get active(): boolean { return this.stream !== null }
 
@@ -47,20 +57,32 @@ export class SearchService extends EventEmitter {
     this.cancel()
     this.filter = filter
     const token = this.cancellable = new Gio.Cancellable()
-    const argv = [process.execPath, WORKER, F.getPath(rootDir), query, showHidden ? '1' : '0']
+    this.emit('start')
+
+    const path = F.getPath(rootDir)
+    const wantContent = !!(filter?.contents && query && path)
+    this._contentMode = wantContent
+
+    let argv: string[]
+    if (wantContent) {
+      const rg = GLib.findProgramInPath('rg')
+      if (!rg) { this.emit('error', 'Content search requires ripgrep (rg), which was not found on PATH.'); return }
+      argv = [rg, ...RG_FLAGS, ...(showHidden ? ['--hidden'] : []), '--', query, path!]
+    } else {
+      argv = [process.execPath, WORKER, path!, query, showHidden ? '1' : '0']
+    }
 
     this.stream = new ProcessStream(argv)
-    this.stream.on('line', (path: string) => this._resolve(path, token))
+    this.stream.on('line', (line: string) => this._resolve(line, token))
     this.stream.on('error', (msg: string) => this.emit('error', msg))
     this.stream.on('end', (ok: boolean) => { this.stream = null; this.emit('end', ok) })
-
-    this.emit('start')
     this.stream.start()
   }
 
   _resolve(line: string, token: any): void {
-    let path
-    try { path = JSON.parse(line) } catch { return }
+    let path: string
+    if (this._contentMode) { if (!line) return; path = line }
+    else { try { path = JSON.parse(line) } catch { return } }
     const file = fileForPath(path)
     F.queryInfoAsync(file, ATTRS, Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_DEFAULT, token,
       (_src: any, res: any) => {

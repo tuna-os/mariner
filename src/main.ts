@@ -37,11 +37,7 @@ app.on('activate', () => {
 })
 
 app.on('window-removed', () => {
-  if (app.getWindows().length === 0) {
-    loop.quit()
-    /* Exit explicitly, as node-gtk otherwise keeps the process alive with GLib handles. */
-    process.exit(0)
-  }
+  if (app.getWindows().length === 0) loop.quit()
 })
 
 app.run()

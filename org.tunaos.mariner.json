@@ -34,8 +34,7 @@
       "buildsystem": "simple",
       "build-commands": [
         "mkdir -p /app/nodejs",
-        "tar xf node.tar.xz -C /app/nodejs --strip-components=1",
-        "rm -f node.tar.xz"
+        "cp -r . /app/nodejs/"
       ],
       "sources": [
         {

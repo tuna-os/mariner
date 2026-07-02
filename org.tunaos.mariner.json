@@ -66,9 +66,7 @@
       "name": "ripgrep",
       "buildsystem": "simple",
       "build-commands": [
-        "tar xzf rg.tar.gz -C /tmp --strip-components=1",
-        "install -Dm755 /tmp/rg /app/bin/rg",
-        "rm -rf /tmp/rg*"
+        "install -Dm755 rg /app/bin/rg"
       ],
       "sources": [
         {
@@ -83,10 +81,8 @@
       "name": "7zip",
       "buildsystem": "simple",
       "build-commands": [
-        "tar xJf 7z.tar.xz -C /tmp --strip-components=1",
-        "install -Dm755 /tmp/7zz /app/bin/7zz",
-        "ln -s 7zz /app/bin/7z",
-        "rm -rf /tmp/7zz* /tmp/readme* /tmp/History* /tmp/License* /tmp/MANUAL"
+        "install -Dm755 7zz /app/bin/7zz",
+        "ln -s 7zz /app/bin/7z"
       ],
       "sources": [
         {

@@ -78,17 +78,20 @@
       ]
     },
     {
-      "name": "7zip",
+      "name": "7z",
       "buildsystem": "simple",
+      "subdir": "p7zip-17.05",
       "build-commands": [
-        "install -Dm755 7zz /app/bin/7zz",
-        "ln -s 7zz /app/bin/7z"
+        "cp makefile.linux_any_cpu makefile.machine",
+        "make -j$(nproc) 7za",
+        "install -Dm755 bin/7za /app/bin/7za",
+        "ln -s 7za /app/bin/7z"
       ],
       "sources": [
         {
           "type": "archive",
-          "url": "https://7-zip.org/a/7z2602-linux-x64.tar.xz",
-          "sha256": "41aaba7b1235304ab5aa0624530c67ae829496cd29e875925271efdccc28c03e",
+          "url": "https://github.com/p7zip-project/p7zip/archive/refs/tags/v17.05.tar.gz",
+          "sha256": "d2788f892571058c08d27095c22154579dfefb807ebe357d145ab2ddddefb1a6",
           "only-arches": ["x86_64"]
         }
       ]

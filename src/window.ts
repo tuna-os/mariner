@@ -372,7 +372,7 @@ export class AppWindow {
     const files = this._selectedFiles()
     if (!other?.location || !files.length) return
     const dest = other.location
-    const plan = await this._resolvePlan(files, dest)
+    const plan = await this._resolvePlan(files, dest, move)
     if (!plan || !plan.length) return
     if (move) {
       const origParent = F.getParent(files[0])
@@ -806,7 +806,7 @@ export class AppWindow {
     const destUri = F.getUri(dest)
     const incoming = files.filter(f => { const p = F.getParent(f); return !p || F.getUri(p) !== destUri })
     if (!incoming.length) return
-    const plan = await this._resolvePlan(incoming, dest)
+    const plan = await this._resolvePlan(incoming, dest, !!targetDir)
     if (!plan || !plan.length) return
     if (targetDir) {
       const origParent = F.getParent(incoming[0])
@@ -828,14 +828,24 @@ export class AppWindow {
 
   /* Turn a set of sources + a destination into a runnable copy/move plan,
    * prompting for any name collisions (Replace / Skip / Keep Both). Returns null
-   * if the user cancels the operation, or the (possibly empty) resolved plan. */
-  async _resolvePlan(files: GFile[], destDir: GFile): Promise<CopyItem[] | null> {
+   * if the user cancels the operation, or the (possibly empty) resolved plan.
+   * `move` distinguishes cut/move from copy so pasting an item into its own
+   * folder is handled sanely (see below) instead of prompting to overwrite it. */
+  async _resolvePlan(files: GFile[], destDir: GFile, move = false): Promise<CopyItem[] | null> {
     const { free, conflicts } = partitionConflicts(files, destDir)
     const items: CopyItem[] = free.map(src => ({ src, dest: F.getChild(destDir, F.getBasename(src)) }))
-    if (conflicts.length) {
-      const res = await resolveConflicts(this.window, conflicts, destDir)
+    /* A collision where the destination *is* the source (pasting an item into
+     * its own folder) is never a real overwrite: copy → duplicate ("keep both"),
+     * move → no-op, so skip. Don't prompt. */
+    const real = conflicts.filter(c => {
+      if (!F.equal(c.src, c.dest)) return true
+      if (!move) items.push({ src: c.src, dest: uniqueChild(destDir, c.name) })
+      return false
+    })
+    if (real.length) {
+      const res = await resolveConflicts(this.window, real, destDir)
       if (!res) return null
-      for (const c of conflicts) {
+      for (const c of real) {
         const action = res.get(c.src)
         if (action === 'skip') continue
         if (action === 'replace') items.push({ src: c.src, dest: c.dest, replace: true })
@@ -851,7 +861,7 @@ export class AppWindow {
     if (this.clipboard.isEmpty) { this._pasteFromSystem(dest); return }
     const files = this.clipboard.files.slice()
     const cut = this.clipboard.cut
-    const plan = await this._resolvePlan(files, dest)
+    const plan = await this._resolvePlan(files, dest, cut)
     if (!plan || !plan.length) return
     if (cut) {
       const origParent = F.getParent(files[0])

@@ -33,6 +33,20 @@ const VIM_DIRS: Record<number, 'left' | 'down' | 'up' | 'right'> = {
   [Gdk.KEY_l]: 'right',
 }
 
+/* Bare modifier keysyms. Pressing one alone must NOT cancel the typeahead: you
+ * hold Shift before a capital, Alt/Ctrl before a chord. Every other
+ * non-printable key does cancel it. */
+const MODIFIER_KEYS = new Set<number>([
+  Gdk.KEY_Shift_L, Gdk.KEY_Shift_R,
+  Gdk.KEY_Control_L, Gdk.KEY_Control_R,
+  Gdk.KEY_Alt_L, Gdk.KEY_Alt_R,
+  Gdk.KEY_Meta_L, Gdk.KEY_Meta_R,
+  Gdk.KEY_Super_L, Gdk.KEY_Super_R,
+  Gdk.KEY_Hyper_L, Gdk.KEY_Hyper_R,
+  Gdk.KEY_Caps_Lock, Gdk.KEY_Shift_Lock, Gdk.KEY_Num_Lock,
+  Gdk.KEY_ISO_Level3_Shift, Gdk.KEY_ISO_Level5_Shift,
+])
+
 /* Presents a stream of {info, file} entries as a grid or list, with explicit
  * loading / empty / error states. Entries arrive incrementally (addEntries) and
  * are kept sorted via binary-search insert; pref changes trigger a full rebuild.
@@ -582,9 +596,9 @@ export class FileView {
      * shortcut controller. */
     if ((state & MODIFIER_MASK) === Gdk.ModifierType.ALT_MASK) {
       const dir = VIM_DIRS[Gdk.keyvalToLower(keyval)]
-      if (dir !== undefined) return this._vimMove(dir)
+      if (dir !== undefined) { this._clearTypeahead(); return this._vimMove(dir) }
     }
-    if (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) return false
+    if (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) { this._clearTypeahead(); return false }
     if (keyval === Gdk.KEY_Escape) { this._clearTypeahead(); return false }
 
     if (keyval === Gdk.KEY_BackSpace) {
@@ -597,7 +611,12 @@ export class FileView {
     }
 
     const ch = Gdk.keyvalToUnicode(keyval)
-    if (!ch || ch < 0x20 || ch === 0x7f) return false   /* not a printable char (0x7f = Delete) */
+    if (!ch || ch < 0x20 || ch === 0x7f) {   /* not a printable char (0x7f = Delete) */
+      /* Any non-printable keystroke (Enter, Tab, arrows, …) cancels an
+       * in-progress query; bare modifiers don't, so Shift+letter still types. */
+      if (!MODIFIER_KEYS.has(keyval)) this._clearTypeahead()
+      return false
+    }
     const s = String.fromCodePoint(ch)
     /* Space with no active typeahead opens the preview (Quick Look), like nautilus. */
     if (!this._typeahead && s === ' ') { this.onPreview(); return true }
@@ -641,6 +660,7 @@ export class FileView {
   }
 
   _clearTypeahead(): void {
+    if (!this._typeahead && !this._typeaheadTimer) return
     if (this._typeaheadTimer) { GLib.sourceRemove(this._typeaheadTimer); this._typeaheadTimer = 0 }
     this._typeahead = ''
     this.floatingBar.hide()

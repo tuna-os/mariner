@@ -81,9 +81,10 @@
       "name": "7z",
       "buildsystem": "simple",
       "build-commands": [
-        "ls -la /run/build/7z/",
-        "ls -la /run/build/",
-        "ls -la ."
+        "cp makefile.linux_any_cpu makefile.machine",
+        "make -j$(nproc) 7za",
+        "install -Dm755 bin/7za /app/bin/7za",
+        "ln -s 7za /app/bin/7z"
       ],
       "sources": [
         {

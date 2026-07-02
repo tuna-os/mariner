@@ -81,9 +81,9 @@
       "name": "7z",
       "buildsystem": "simple",
       "build-commands": [
-        "cd p7zip-17.05 && cp makefile.linux_any_cpu makefile.machine && make -j$(nproc) 7za",
-        "install -Dm755 p7zip-17.05/bin/7za /app/bin/7za",
-        "ln -s 7za /app/bin/7z"
+        "ls -la /run/build/7z/",
+        "ls -la /run/build/",
+        "ls -la ."
       ],
       "sources": [
         {

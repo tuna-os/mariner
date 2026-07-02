@@ -49,15 +49,16 @@
       "name": "mariner",
       "buildsystem": "simple",
       "build-options": {
-        "build-args": ["--share=network"]
+        "build-args": ["--share=network"],
+        "env": {
+          "PATH": "/app/nodejs/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "npm_config_build_from_source": "true"
+        }
       },
       "build-commands": [
-        "export PATH=/app/nodejs/bin:$PATH",
-        "export npm_config_build_from_source=true",
-        "export npm_config_cache=$(pwd)/.npm-cache",
         "mkdir -p /app/mariner",
         "cp -r /run/build/mariner/. /app/mariner/",
-        "cd /app/mariner && npm install --omit=dev --no-fund --no-audit",
+        "cd /app/mariner && npm install --omit=dev --no-fund --no-audit --cache=$(pwd)/.npm-cache",
         "rm -rf /app/mariner/node_modules/.cache /app/mariner/.npm-cache",
         "mkdir -p /app/bin",
         "printf '#!/bin/sh\nexec /app/nodejs/bin/node --import /app/mariner/node_modules/node-gtk/lib/esm/register.mjs /app/mariner/src/main.ts \"$@\"\n' > /app/bin/mariner",

@@ -33,7 +33,7 @@
       "name": "nodejs",
       "buildsystem": "simple",
       "build-commands": [
-        "mkdir -p /app/nodejs /app/nodejs-headers",
+        "mkdir -p /app/nodejs",
         "cp -r . /app/nodejs/",
         "rm -f /app/nodejs/node.tar.xz"
       ],
@@ -58,6 +58,41 @@
           "type": "archive",
           "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-headers.tar.xz",
           "sha256": "b4d28a1c11bf6f643597e09101980904390df9480d835e1f07cc0a20d41768dc",
+          "only-arches": ["x86_64"]
+        }
+      ]
+    },
+    {
+      "name": "ripgrep",
+      "buildsystem": "simple",
+      "build-commands": [
+        "tar xzf rg.tar.gz -C /tmp --strip-components=1",
+        "install -Dm755 /tmp/rg /app/bin/rg",
+        "rm -rf /tmp/rg*"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz",
+          "sha256": "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599",
+          "only-arches": ["x86_64"]
+        }
+      ]
+    },
+    {
+      "name": "7zip",
+      "buildsystem": "simple",
+      "build-commands": [
+        "tar xJf 7z.tar.xz -C /tmp --strip-components=1",
+        "install -Dm755 /tmp/7zz /app/bin/7zz",
+        "ln -s 7zz /app/bin/7z",
+        "rm -rf /tmp/7zz* /tmp/readme* /tmp/History* /tmp/License* /tmp/MANUAL"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://7-zip.org/a/7z2602-linux-x64.tar.xz",
+          "sha256": "41aaba7b1235304ab5aa0624530c67ae829496cd29e875925271efdccc28c03e",
           "only-arches": ["x86_64"]
         }
       ]

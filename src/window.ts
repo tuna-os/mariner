@@ -26,7 +26,7 @@ import { compressDialog } from './ui/compress.ts'
 import { openWithDialog } from './ui/open-with.ts'
 import { buildContextMenu } from './ui/context-menu.ts'
 import { columnChooserDialog } from './ui/column-chooser.ts'
-import { defaultColumnConfig } from './core/columns.ts'
+import { loadViewPrefs, saveViewPrefs } from './services/view-prefs.ts'
 import { QuickLook } from './ui/preview.ts'
 import { OperationsQueue } from './ui/operations-queue.ts'
 import { resolveConflicts, partitionConflicts } from './ui/conflict-dialog.ts'
@@ -46,7 +46,7 @@ function boolValue(b: boolean): any {
 
 export class AppWindow {
   app: any
-  prefs: Prefs = { showHidden: false, sortKey: 'name', sortDesc: false, viewMode: 'grid', iconSize: 64, columns: defaultColumnConfig() }
+  prefs: Prefs = { showHidden: false, sortKey: 'name', sortDesc: false, iconSize: 64, ...loadViewPrefs() }
   tabs: Tab[] = []
   _activeTab: Tab | null = null
   searching = false
@@ -541,6 +541,7 @@ export class AppWindow {
     this.prefs.viewMode = mode
     this.toolbar.setViewIcon(mode)
     this.activeTab?.applyPrefs()
+    saveViewPrefs(this.prefs)
   }
 
   /* Open the "Visible Columns" chooser. Switches to the list view first so the
@@ -550,6 +551,7 @@ export class AppWindow {
     columnChooserDialog(this.window, this.prefs.columns, columns => {
       this.prefs.columns = columns
       this.activeTab?.applyColumns()
+      saveViewPrefs(this.prefs)
     })
   }
 

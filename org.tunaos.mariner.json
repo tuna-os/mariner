@@ -33,8 +33,9 @@
       "name": "nodejs",
       "buildsystem": "simple",
       "build-commands": [
-        "mkdir -p /app/nodejs",
-        "cp -r . /app/nodejs/"
+        "mkdir -p /app/nodejs /app/nodejs-headers",
+        "cp -r . /app/nodejs/",
+        "rm -f /app/nodejs/node.tar.xz"
       ],
       "sources": [
         {
@@ -46,20 +47,38 @@
       ]
     },
     {
+      "name": "node-headers",
+      "buildsystem": "simple",
+      "build-commands": [
+        "mkdir -p /app/nodejs-headers",
+        "cp -r . /app/nodejs-headers/"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-headers.tar.xz",
+          "sha256": "b4d28a1c11bf6f643597e09101980904390df9480d835e1f07cc0a20d41768dc",
+          "only-arches": ["x86_64"]
+        }
+      ]
+    },
+    {
       "name": "mariner",
       "buildsystem": "simple",
       "build-options": {
         "build-args": ["--share=network"],
         "env": {
           "PATH": "/app/nodejs/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-          "npm_config_build_from_source": "true"
+          "npm_config_build_from_source": "true",
+          "npm_config_nodedir": "/app/nodejs-headers",
+          "npm_config_cache": "/tmp/npm-cache"
         }
       },
       "build-commands": [
         "mkdir -p /app/mariner",
         "cp -r /run/build/mariner/. /app/mariner/",
-        "cd /app/mariner && npm install --omit=dev --no-fund --no-audit --cache=$(pwd)/.npm-cache",
-        "rm -rf /app/mariner/node_modules/.cache /app/mariner/.npm-cache",
+        "cd /app/mariner && npm install --omit=dev --no-fund --no-audit",
+        "rm -rf /app/mariner/node_modules/.cache /tmp/npm-cache",
         "mkdir -p /app/bin",
         "printf '#!/bin/sh\nexec /app/nodejs/bin/node --import /app/mariner/node_modules/node-gtk/lib/esm/register.mjs /app/mariner/src/main.ts \"$@\"\n' > /app/bin/mariner",
         "chmod 755 /app/bin/mariner",

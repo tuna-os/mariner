@@ -11,42 +11,65 @@ permissions:
   packages: write
 
 jobs:
-  build-oci:
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
-    name: Build (${{ matrix.arch }})
+  build-x86_64:
+    name: Build (x86_64)
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
     steps:
-      - name: Setup QEMU for aarch64
-        if: matrix.arch == 'aarch64'
-        uses: docker/setup-qemu-action@v3
-
       - uses: actions/checkout@v4
-
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: org.tunaos.mariner.json
-          cache-key: flatpak-builder-${{ github.sha }}-${{ matrix.arch }}
+          cache-key: flatpak-builder-${{ github.sha }}-x86_64
           build-bundle: false
           upload-artifact: false
-          arch: ${{ matrix.arch }}
+      - name: Export OCI
+        run: |
+          flatpak build-bundle --oci --arch=x86_64 repo mariner-x86_64.oci org.tunaos.mariner
+      - name: Upload OCI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mariner-oci-x86_64
+          path: mariner-x86_64.oci/
+          retention-days: 1
+
+  build-aarch64:
+    name: Build (aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: actions/checkout@v4
+
+      - name: Build Flatpak (aarch64)
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: org.tunaos.mariner.json
+          cache-key: flatpak-builder-${{ github.sha }}-aarch64
+          build-bundle: false
+          upload-artifact: false
+          arch: aarch64
 
       - name: Export OCI
         run: |
-          flatpak build-bundle --oci --arch=${{ matrix.arch }} repo mariner-${{ matrix.arch }}.oci org.tunaos.mariner
+          flatpak build-bundle --oci --arch=aarch64 repo mariner-aarch64.oci org.tunaos.mariner
 
       - name: Upload OCI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mariner-oci-${{ matrix.arch }}
-          path: mariner-${{ matrix.arch }}.oci/
+          name: mariner-oci-aarch64
+          path: mariner-aarch64.oci/
           retention-days: 1
 
   publish:
     name: Publish
-    needs: build-oci
+    needs: [build-x86_64, build-aarch64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,7 +113,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add static/flatpak/index/static
-          if git diff --cached --quiet; then echo \"No index changes\"
+          if git diff --cached --quiet; then echo "No index changes"
           else
             git commit -m "chore(flatpak): update Mariner OCI index [${{ github.ref_name }}]"
             git push origin main

@@ -19,7 +19,8 @@
     "--talk-name=org.gtk.vfs.Daemon",
     "--talk-name=org.gtk.vfs.Notifications",
     "--system-talk-name=org.freedesktop.UDisks2",
-    "--env=GIO_EXTRA_MODULES=/app/lib/gio/modules"
+    "--env=GIO_EXTRA_MODULES=/app/lib/gio/modules",
+    "--own-name=com.github.romgrk.mariner"
   ],
   "cleanup": [
     "/include",

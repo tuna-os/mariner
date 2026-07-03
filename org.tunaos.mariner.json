@@ -96,6 +96,22 @@
       ]
     },
     {
+      "name": "unrar",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cd unrar && make -j$(nproc) -f makefile",
+        "install -Dm755 unrar/unrar /app/bin/unrar"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://www.rarlab.com/rar/unrarsrc-7.1.6.tar.gz",
+          "sha256": "ca5e1da37dd6fa1b78bb5ed675486413f79e4a917709744aa04b6f93dfd914f0",
+          "only-arches": ["x86_64"]
+        }
+      ]
+    },
+    {
       "name": "mariner",
       "buildsystem": "simple",
       "build-options": {
@@ -115,6 +131,10 @@
         "mkdir -p /app/bin",
         "printf '#!/bin/sh\nexec /app/nodejs/bin/node --import /app/mariner/node_modules/node-gtk/lib/esm/register.mjs /app/mariner/src/main.ts \"$@\"\n' > /app/bin/mariner",
         "chmod 755 /app/bin/mariner",
+        "printf '%s\\n' '#!/bin/sh' '' '# Terminal wrapper - delegates to host via flatpak-spawn' 'for term in ptyxis kgx gnome-terminal konsole alacritty foot xterm; do' '  if flatpak-spawn --host sh -c \"command -v \\$term\" >/dev/null 2>&1; then' '    exec flatpak-spawn --host \"$term\" \"$@\"' '  fi' 'done' 'exit 1' > /app/bin/ptyxis",
+        "chmod 755 /app/bin/ptyxis",
+        "printf '%s\\n' '#!/bin/sh' '' '# unar wrapper -> unrar for RAR extraction' 'force=' 'dest=' 'while [ $# -gt 0 ]; do' '  case $1 in' '    -f) force=-o+; shift;;' '    -o) shift; dest=$1; shift;;' '    *) file=$1; shift;;' '  esac' 'done' 'exec /app/bin/unrar x $force \"$file\" \"${dest:-.}\"/' > /app/bin/unar",
+        "chmod 755 /app/bin/unar",
         "install -Dm644 /app/mariner/data/com.github.romgrk.mariner.desktop /app/share/applications/com.github.romgrk.mariner.desktop",
         "install -Dm644 /app/mariner/data/com.github.romgrk.mariner.metainfo.xml /app/share/metainfo/com.github.romgrk.mariner.metainfo.xml",
         "install -Dm644 /app/mariner/data/icons/hicolor/scalable/apps/com.github.romgrk.mariner.svg /app/share/icons/hicolor/scalable/apps/com.github.romgrk.mariner.svg"

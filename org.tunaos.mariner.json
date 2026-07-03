@@ -99,8 +99,8 @@
       "name": "unrar",
       "buildsystem": "simple",
       "build-commands": [
-        "cd unrar && make -j$(nproc) -f makefile",
-        "install -Dm755 unrar/unrar /app/bin/unrar"
+        "make -j$(nproc) -f makefile",
+        "install -Dm755 unrar /app/bin/unrar"
       ],
       "sources": [
         {

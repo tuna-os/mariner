@@ -11,43 +11,32 @@ permissions:
   packages: write
 
 jobs:
-  build-x86_64:
-    name: Build (x86_64)
+  build:
+    name: Build
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
       options: --privileged
     steps:
       - uses: actions/checkout@v4
-      - name: Build Flatpak
+
+      - name: Install aarch64 GNOME SDK (for cross-build)
+        run: |
+          flatpak install --noninteractive flathub org.gnome.Sdk/aarch64/50 2>&1 | tail -3 || true
+
+      - name: Build x86_64
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: org.tunaos.mariner.json
           cache-key: flatpak-builder-${{ github.sha }}-x86_64
           build-bundle: false
           upload-artifact: false
-      - name: Export OCI
+
+      - name: Export x86_64 OCI
         run: |
           flatpak build-bundle --oci --arch=x86_64 repo mariner-x86_64.oci org.tunaos.mariner
-      - name: Upload OCI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mariner-oci-x86_64
-          path: mariner-x86_64.oci/
-          retention-days: 1
 
-  build-aarch64:
-    name: Build (aarch64)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - uses: actions/checkout@v4
-
-      - name: Build Flatpak (aarch64)
+      - name: Build aarch64
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: org.tunaos.mariner.json
@@ -56,39 +45,34 @@ jobs:
           upload-artifact: false
           arch: aarch64
 
-      - name: Export OCI
+      - name: Export aarch64 OCI
         run: |
           flatpak build-bundle --oci --arch=aarch64 repo mariner-aarch64.oci org.tunaos.mariner
 
-      - name: Upload OCI artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mariner-oci-aarch64
-          path: mariner-aarch64.oci/
+          name: mariner-oci
+          path: mariner-*.oci/
           retention-days: 1
 
   publish:
     name: Publish
-    needs: [build-x86_64, build-aarch64]
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
         with:
-          name: mariner-oci-x86_64
-          path: mariner-oci-x86_64
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: mariner-oci-aarch64
-          path: mariner-oci-aarch64
+          name: mariner-oci
+          path: mariner-oci
 
       - name: Push to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
-          skopeo copy oci:mariner-oci-x86_64 docker://ghcr.io/tuna-os/mariner:latest-x86_64
-          skopeo copy oci:mariner-oci-aarch64 docker://ghcr.io/tuna-os/mariner:latest-aarch64
+          skopeo copy oci:mariner-oci/mariner-x86_64.oci docker://ghcr.io/tuna-os/mariner:latest-x86_64
+          skopeo copy oci:mariner-oci/mariner-aarch64.oci docker://ghcr.io/tuna-os/mariner:latest-aarch64
 
       - name: Update index
         run: |
@@ -98,13 +82,13 @@ jobs:
           pip install requests
 
           python3 .github/scripts/update-index.py \
-            --oci-dir mariner-oci-x86_64 \
+            --oci-dir mariner-oci/mariner-x86_64.oci \
             --index-file index-repo/static/flatpak/index/static \
             --repo-name tuna-os/mariner \
             --tags latest
 
           python3 .github/scripts/update-index.py \
-            --oci-dir mariner-oci-aarch64 \
+            --oci-dir mariner-oci/mariner-aarch64.oci \
             --index-file index-repo/static/flatpak/index/static \
             --repo-name tuna-os/mariner \
             --tags latest

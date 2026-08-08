@@ -26,6 +26,12 @@ on:
   push:
     branches: [master]
     tags: ['v*']
+  # Build-only validation for PRs that touch the build. Nothing here published
+  # to GHCR until it was already on master, which is how a broken aarch64 leg
+  # stayed red for five weeks without anything catching it pre-merge. The
+  # publish job below is gated off for this event.
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -72,6 +78,10 @@ jobs:
   publish:
     name: Publish
     needs: build
+    # Never publish from a pull request: this pushes :latest-* to GHCR and
+    # commits to tuna-os/docs, and PR branches (including fork branches) must
+    # not be able to do either.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

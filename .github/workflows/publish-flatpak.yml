@@ -35,8 +35,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+concurrency:
+  group: publish-flatpak-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -83,6 +86,9 @@ jobs:
     # not be able to do either.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 

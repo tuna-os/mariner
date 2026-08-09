@@ -56,4 +56,3 @@ jobs:
             Automated sync from [romgrk/mariner](https://github.com/romgrk/mariner).
 
             The upstream merge is prepared as a pull request so TunaOS CI can validate it before merge.
-          labels: upstream-sync

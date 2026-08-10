@@ -1,0 +1,58 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "15 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'tuna-os/mariner'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out TunaOS Mariner
+        uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Merge upstream master
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/romgrk/mariner.git
+          git fetch --no-tags upstream master
+
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "tunaos-ci"
+          git config user.email "ci@tunaos.org"
+          git merge --no-edit --no-ff upstream/master
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$(git rev-parse --short upstream/master)" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update sync pull request
+        if: steps.merge.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/sync-upstream
+          delete-branch: true
+          commit-message: "chore(sync): merge upstream master"
+          title: "chore(sync): merge upstream master (${{ steps.merge.outputs.upstream_sha }})"
+          body: |
+            Automated sync from [romgrk/mariner](https://github.com/romgrk/mariner).
+
+            The upstream merge is prepared as a pull request so TunaOS CI can validate it before merge.

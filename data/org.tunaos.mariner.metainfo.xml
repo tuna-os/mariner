@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.github.romgrk.mariner</id>
+  <id>org.tunaos.mariner</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
@@ -24,7 +24,7 @@
     </ul>
   </description>
 
-  <launchable type="desktop-id">com.github.romgrk.mariner.desktop</launchable>
+  <launchable type="desktop-id">org.tunaos.mariner.desktop</launchable>
 
   <categories>
     <category>Utility</category>

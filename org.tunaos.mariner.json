@@ -4,8 +4,6 @@
   "runtime-version": "50",
   "sdk": "org.gnome.Sdk",
   "command": "mariner",
-  "rename-desktop-file": "com.github.romgrk.mariner.desktop",
-  "rename-icon": "com.github.romgrk.mariner",
   "tags": ["latest"],
   "finish-args": [
     "--share=ipc",
@@ -20,7 +18,7 @@
     "--talk-name=org.gtk.vfs.Notifications",
     "--system-talk-name=org.freedesktop.UDisks2",
     "--env=GIO_EXTRA_MODULES=/app/lib/gio/modules",
-    "--own-name=com.github.romgrk.mariner"
+    "--own-name=org.tunaos.mariner"
   ],
   "cleanup": [
     "/include",
@@ -145,9 +143,9 @@
         "chmod 755 /app/bin/ptyxis",
         "printf '%s\\n' '#!/bin/sh' '' '# unar wrapper -> unrar for RAR extraction' 'force=' 'dest=' 'while [ $# -gt 0 ]; do' '  case $1 in' '    -f) force=-o+; shift;;' '    -o) shift; dest=$1; shift;;' '    *) file=$1; shift;;' '  esac' 'done' 'exec /app/bin/unrar x $force \"$file\" \"${dest:-.}\"/' > /app/bin/unar",
         "chmod 755 /app/bin/unar",
-        "install -Dm644 /app/mariner/data/com.github.romgrk.mariner.desktop /app/share/applications/com.github.romgrk.mariner.desktop",
-        "install -Dm644 /app/mariner/data/com.github.romgrk.mariner.metainfo.xml /app/share/metainfo/com.github.romgrk.mariner.metainfo.xml",
-        "install -Dm644 /app/mariner/data/icons/hicolor/scalable/apps/com.github.romgrk.mariner.svg /app/share/icons/hicolor/scalable/apps/com.github.romgrk.mariner.svg"
+        "install -Dm644 /app/mariner/data/org.tunaos.mariner.desktop /app/share/applications/org.tunaos.mariner.desktop",
+        "install -Dm644 /app/mariner/data/org.tunaos.mariner.metainfo.xml /app/share/metainfo/org.tunaos.mariner.metainfo.xml",
+        "install -Dm644 /app/mariner/data/icons/hicolor/scalable/apps/org.tunaos.mariner.svg /app/share/icons/hicolor/scalable/apps/org.tunaos.mariner.svg"
       ],
       "sources": [
         {

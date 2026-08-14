@@ -134,7 +134,7 @@
       "build-commands": [
         "mkdir -p /app/mariner",
         "cp -r /run/build/mariner/. /app/mariner/",
-        "cd /app/mariner && npm install --omit=dev --no-fund --no-audit",
+        "cd /app/mariner && npm install --no-fund --no-audit && npm run typecheck && npm prune --omit=dev --no-fund --no-audit",
         "rm -rf /app/mariner/node_modules/.cache /tmp/npm-cache",
         "mkdir -p /app/bin",
         "printf '#!/bin/sh\nexec /app/nodejs/bin/node --import /app/mariner/node_modules/node-gtk/lib/esm/register.mjs /app/mariner/src/main.ts \"$@\"\n' > /app/bin/mariner",

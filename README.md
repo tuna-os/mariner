@@ -167,7 +167,20 @@ These are on the roadmap rather than out of scope — see
 
 ## Install
 
+### Flatpak (TunaOS remote)
+
+This repository is the TunaOS fork of Mariner — the fork is published as a
+Flatpak on the TunaOS remote:
+
+```sh
+flatpak remote-add --if-not-exists tuna-os https://tunaos.org/flatpak/tuna-os.flatpakrepo
+flatpak install tuna-os org.tunaos.mariner
+```
+
 ### Arch Linux (AUR)
+
+> The `mariner-git` AUR package builds the **upstream** project
+> (romgrk/mariner), not this fork. For the TunaOS fork, use the Flatpak above.
 
 ```sh
 # with an AUR helper
@@ -193,7 +206,7 @@ bindings on first install). [ripgrep](https://github.com/BurntSushi/ripgrep) is
 optional — it enables full-text (in-file) search.
 
 ```sh
-git clone https://github.com/romgrk/mariner.git && cd mariner
+git clone https://github.com/tuna-os/mariner.git && cd mariner
 npm install      # fetches and builds node-gtk
 npm start
 ```

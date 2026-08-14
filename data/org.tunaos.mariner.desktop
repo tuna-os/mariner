@@ -9,6 +9,6 @@ Exec=mariner %U
 Icon=org.tunaos.mariner
 Terminal=false
 StartupNotify=true
-StartupWMClass=com.github.romgrk.mariner
+StartupWMClass=org.tunaos.mariner
 Categories=GNOME;GTK;Utility;Core;FileManager;
 MimeType=inode/directory;

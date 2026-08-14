@@ -195,7 +195,7 @@ Mariner then appears in your application menu. To make it your default file
 manager:
 
 ```sh
-xdg-mime default com.github.romgrk.mariner.desktop inode/directory
+xdg-mime default org.tunaos.mariner.desktop inode/directory
 ```
 
 ### From source

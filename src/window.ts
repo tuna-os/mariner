@@ -5,6 +5,8 @@ import GLib from 'gi:GLib-2.0'
 import GObject from 'gi:GObject-2.0'
 import Gdk from 'gi:Gdk-4.0'
 
+import { buildActions } from './action-registry.ts'
+import { appMenu } from './ui/app-menu.ts'
 import { Tab } from './tab.ts'
 import { ACCELS, accelHint } from './accels.ts'
 import { F, fileForPath, fileForUri, ATTRS } from './core/gio.ts'
@@ -15,15 +17,12 @@ import { FileOperations, uniqueChild } from './services/file-operations.ts'
 import { UndoService } from './services/undo-service.ts'
 import { ArchiveService, isArchive } from './services/archive-service.ts'
 import { loadWindowState, saveWindowState } from './services/window-state.ts'
-import { promptText, confirm, showProperties, aboutDialog } from './ui/dialogs.ts'
+import { promptText, confirm, showProperties } from './ui/dialogs.ts'
 import { createSidebar } from './ui/sidebar.ts'
 import { addBookmark, removeBookmark, isBookmarked } from './services/places-service.ts'
 import { createToolbar } from './ui/toolbar.ts'
-import { shortcutsDialog } from './ui/shortcuts.ts'
-import { preferencesDialog } from './ui/preferences.ts'
 import { batchRenameDialog } from './ui/batch-rename.ts'
 import { compressDialog } from './ui/compress.ts'
-import { openWithDialog } from './ui/open-with.ts'
 import { buildContextMenu } from './ui/context-menu.ts'
 import { columnChooserDialog } from './ui/column-chooser.ts'
 import { loadViewPrefs, saveViewPrefs } from './services/view-prefs.ts'
@@ -35,7 +34,7 @@ import { CommandPalette } from './ui/command-palette.ts'
 import type { PaletteItem } from './ui/command-palette.ts'
 import type { Prefs, GFile, GFileInfo, Entry, CopyItem, OpError } from './core/types.ts'
 
-const MIN_ZOOM = 32, MAX_ZOOM = 128, ZOOM_STEP = 16, DEFAULT_ZOOM = 64
+export const MIN_ZOOM = 32, MAX_ZOOM = 128, ZOOM_STEP = 16, DEFAULT_ZOOM = 64
 
 function boolValue(b: boolean): any {
   const v = new GObject.Value()
@@ -82,7 +81,7 @@ export class AppWindow {
   constructor(app: any, startFile: GFile) {
     this.app = app
     this._buildUI()
-    this._buildActions()
+    buildActions(this)
     this._installShortcuts()
     this._wireFileOps()
     this.openTab(startFile)
@@ -90,6 +89,11 @@ export class AppWindow {
   }
 
   get activeTab(): Tab | null { return this._activeTab }
+
+  /* Open a second window at the same location (the win.new-window action). */
+  _newWindow(): AppWindow {
+    return new AppWindow(this.app, this.activeTab?.location ?? fileForPath(HOME))
+  }
 
   _saveState(): void {
     const maximized = this.window.isMaximized()
@@ -138,7 +142,7 @@ export class AppWindow {
     const sidebarView = new Adw.ToolbarView()
     const sidebarHeader = new Adw.HeaderBar()
     sidebarHeader.setTitleWidget(new Adw.WindowTitle({ title: 'Mariner' }))
-    sidebarHeader.packEnd(new Gtk.MenuButton({ iconName: 'open-menu-symbolic', tooltipText: 'Main Menu', menuModel: this._appMenu() }))
+    sidebarHeader.packEnd(new Gtk.MenuButton({ iconName: 'open-menu-symbolic', tooltipText: 'Main Menu', menuModel: appMenu() }))
     sidebarView.addTopBar(sidebarHeader)
     sidebarView.setContent(this.sidebar.widget)
     this.split.setSidebar(sidebarView)
@@ -181,28 +185,6 @@ export class AppWindow {
     } catch { /* responsive collapse is optional */ }
   }
 
-  _appMenu(): any {
-    const menu = Gio.Menu.new()
-    const s1 = Gio.Menu.new()
-    s1.append('Command Palette', 'win.command-palette')
-    s1.append('New Window', 'win.new-window')
-    s1.append('New Tab', 'win.new-tab')
-    s1.append('Split View', 'win.toggle-split')
-    s1.append('Add to Bookmarks', 'win.add-bookmark')
-    menu.appendSection(null, s1)
-    const s2 = Gio.Menu.new()
-    s2.append('Undo', 'win.undo')
-    s2.append('Redo', 'win.redo')
-    menu.appendSection(null, s2)
-    const s3 = Gio.Menu.new()
-    s3.append('Preferences', 'win.preferences')
-    s3.append('Keyboard Shortcuts', 'win.shortcuts')
-    s3.append('About Files', 'win.about')
-    s3.append('Quit', 'win.quit')
-    menu.appendSection(null, s3)
-    return menu
-  }
-
   /* ---- File-operation feedback ---- */
   _wireFileOps(): void {
     /* Long ops show per-op progress + cancel in the header operations queue. */
@@ -228,118 +210,7 @@ export class AppWindow {
     this.archive.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
   }
 
-  /* ---- Actions ---- */
-  _buildActions(): void {
-    const add = (name: string, cb: () => void): any => {
-      const a = Gio.SimpleAction.new(name, null)
-      a.on('activate', cb)
-      this.window.addAction(a)
-      this._actions[name] = a
-      return a
-    }
-    const addToggle = (name: string, initial: boolean, cb: (a: any) => void): any => {
-      const a = Gio.SimpleAction.newStateful(name, null, GLib.Variant.newBoolean(initial))
-      a.on('change-state', () => cb(a))
-      this.window.addAction(a)
-      this._actions[name] = a
-      return a
-    }
-
-    this.backAction = add('back', () => this.activeTab?.back())
-    this.forwardAction = add('forward', () => this.activeTab?.forward())
-    this.upAction = add('up', () => this.activeTab?.up())
-    add('reload', () => this.activeTab?.reload())
-    add('go-home', () => this.navigate(fileForPath(HOME)))
-
-    add('new-tab', () => this.openTab(this.activeTab?.location ?? fileForPath(HOME)))
-    add('new-window', () => new AppWindow(this.app, this.activeTab?.location ?? fileForPath(HOME)))
-    add('toggle-split', () => this.activeTab?.toggleSplit())
-    add('focus-other-pane', () => this.activeTab?.focusOtherPane())
-    add('command-palette', () => this._openPalette())
-    add('copy-to-other-pane', () => this._copyToOtherPane(false))
-    add('move-to-other-pane', () => this._copyToOtherPane(true))
-    add('close-tab', () => { if (this.activeTab) this.tabView.closePage(this.activeTab.page) })
-    add('tab-prev', () => this.tabView.selectPreviousPage())
-    add('tab-next', () => this.tabView.selectNextPage())
-    add('quit', () => this.window.close())
-    add('about', () => aboutDialog(this.window))
-    add('shortcuts', () => shortcutsDialog().present(this.window))
-    add('preferences', () => preferencesDialog(this.window, this))
-
-    this.undoAction = add('undo', () => this.undo.undo())
-    this.redoAction = add('redo', () => this.undo.redo())
-    this.undoAction.setEnabled(false)
-    this.redoAction.setEnabled(false)
-
-    add('new-folder', () => this._newFolder())
-    add('create-link', () => this._link())
-    add('toggle-view', () => this._setViewMode(this.prefs.viewMode === 'grid' ? 'list' : 'grid'))
-    add('view-grid', () => this._setViewMode('grid'))
-    add('view-list', () => this._setViewMode('list'))
-    add('zoom-in', () => this._zoom(ZOOM_STEP))
-    add('zoom-out', () => this._zoom(-ZOOM_STEP))
-    add('zoom-reset', () => this._zoom(DEFAULT_ZOOM - this.prefs.iconSize))
-    add('choose-columns', () => this._chooseColumns())
-    add('invert-selection', () => this.activeTab?.view.invertSelection())
-
-    for (const key of ['name', 'size', 'type', 'modified'] as const) {
-      this.sortActions[key] = addToggle('sort-' + key, key === this.prefs.sortKey, () => {
-        this.prefs.sortKey = key
-        this._syncSort()
-        this.activeTab?.applyPrefs()
-      })
-    }
-    this.sortDescAction = addToggle('sort-desc', false, () => {
-      this.prefs.sortDesc = !this.prefs.sortDesc
-      this.sortDescAction.setState(GLib.Variant.newBoolean(this.prefs.sortDesc))
-      this.activeTab?.applyPrefs()
-    })
-    this.hiddenAction = addToggle('show-hidden', false, () => {
-      this.prefs.showHidden = !this.prefs.showHidden
-      this.hiddenAction.setState(GLib.Variant.newBoolean(this.prefs.showHidden))
-      this.activeTab?.applyPrefs()
-    })
-
-    add('location', () => this._showLocationEntry())
-    this.searchAction = addToggle('search', false, () => this._toggleSearch())
-    this.toolbar.searchButton.setActionName('win.search')
-
-    add('select-all', () => this.activeTab?.view.selectAll())
-    add('preview', () => { if (this.activeTab) this.togglePreview(this.activeTab) })
-    add('open', () => this._openSelection())
-    add('open-new-tab', () => this._openNewTab())
-    add('open-with', () => { const s = this._selected()[0]; if (s) openWithDialog(this.window, s.info, s.file) })
-    add('open-terminal', () => this._openTerminal())
-    add('set-wallpaper', () => this._setWallpaper())
-    add('copy', () => this._clip(false))
-    add('cut', () => this._clip(true))
-    add('paste', () => this._paste())
-    add('rename', () => this._renameSelected())
-    add('trash', () => this._trash())
-    add('delete', () => this._delete())
-    add('properties', () => this._properties())
-    add('empty-trash', () => this._emptyTrash())
-    add('restore', () => this._restore())
-    add('extract-here', () => this._extractHere())
-    add('compress', () => this._compress())
-    add('disk-usage', () => this._diskUsage())
-
-    /* Computer-view drive menu — these act on `_ctxFile` (the drive's mount
-     * point), set when the menu is opened, since that view has no selection. */
-    add('drive-open', () => { if (this._ctxFile) this.navigate(this._ctxFile) })
-    add('drive-open-tab', () => { if (this._ctxFile) this.openTab(this._ctxFile) })
-    add('drive-usage', () => { if (this._ctxFile) this._propertiesFor(this._ctxFile, { expandUsage: true }) })
-    add('drive-properties', () => { if (this._ctxFile) this._propertiesFor(this._ctxFile) })
-
-    /* Bookmarks. add-bookmark (menu/keyboard) targets the current folder;
-     * ctx-add-bookmark and the open/remove entries act on `_ctxFile`, which the
-     * file-view and sidebar context menus set to the folder under the cursor. */
-    add('add-bookmark', () => this._addBookmark(this.activeTab?.location ?? null))
-    add('ctx-add-bookmark', () => this._addBookmark(this._ctxFile))
-    add('bookmark-open', () => { if (this._ctxFile) this.navigate(this._ctxFile) })
-    add('bookmark-open-tab', () => { if (this._ctxFile) this.openTab(this._ctxFile) })
-    add('remove-bookmark', () => this._removeBookmark(this._ctxFile))
-  }
+  /* ---- Actions (registry lives in action-registry.ts) ---- */
 
   /* Analyze disk usage of the selected folder (or the current location): opens
    * Properties with the "Disk Usage" chart pre-expanded. Local paths only. */

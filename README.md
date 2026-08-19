@@ -100,19 +100,6 @@ a colourful sunburst chart. Click a wedge to drill in. No separate app to instal
   <!-- screenshot placeholder — drop docs/disk-usage.png here -->
 </p>
 
-### Custom actions
-
-Add your own commands to the right-click menu — open a project in your editor,
-optimize the selected images, run any script on what's selected. Define them in a
-small JSON file and they show up automatically, shown only for the files they
-apply to. See [Configuring custom actions](#configuring-custom-actions) for the
-format.
-
-<p align="center">
-  <img src="docs/custom-actions.png" alt="Custom actions in the context menu" width="820">
-  <!-- screenshot placeholder — drop docs/custom-actions.png here -->
-</p>
-
 ---
 
 ## Everything that's different from GNOME Files
@@ -127,8 +114,6 @@ Nautilus doesn't (or does differently):
 - **Frecency folder jumping** — recent folders ranked by frequency × recency.
 - **Full-text search** — grep inside files via ripgrep, no indexing daemon.
 - **Disk usage analyzer** — interactive sunburst chart, built in.
-- **Custom actions** — add your own scripts to the context menu, matched to the
-  selection by type, extension, or count.
 - **Computer view** — every drive and partition with a live capacity bar.
 - **Vim cursor keys** — `Alt+H`/`J`/`K`/`L` move the selection like arrows.
 - **Operations queue** — each running copy/move/archive shown separately, with its
@@ -153,9 +138,10 @@ Mariner is young, and a few things GNOME Files does haven't landed yet:
 - **Network & remote locations** — no SMB/Windows shares, SFTP/SSH, FTP, WebDAV,
   or NFS; no MTP phones or cloud accounts; and no *Connect to Server* or *Other
   Locations* browser. Mariner sees only local disks and already-mounted volumes.
-- **Editing bookmarks** — your existing GNOME Files bookmarks show up in the
-  sidebar, but adding, removing, or reordering them from inside Mariner isn't
-  wired up yet.
+- **Reordering or labelling bookmarks** — bookmarks can be added and removed,
+  but reordering them or assigning custom labels isn't wired up yet.
+- **Custom actions** — user-defined commands in the file-view context menu are
+  planned but not implemented yet.
 - **Starred files** — there's no star/unstar action and no Starred view.
 - **Editing permissions** — the Properties dialog shows an item's permissions but
   can't yet change them (no read/write/execute toggles).
@@ -233,56 +219,6 @@ knowing up front:
 | **Ctrl+L** | Type a path |
 | **Ctrl+1** / **Ctrl+2** | List / grid view |
 | **F2** | Rename (batch rename with a multi-selection) |
-
-### Configuring custom actions
-
-You can add your own commands to the file-view context menu. Create
-`~/.config/mariner/actions.json` (honouring `$XDG_CONFIG_HOME`) with a list of
-actions:
-
-```json
-{
-  "actions": [
-    { "label": "Open in VS Code", "command": "code %F" },
-    {
-      "label": "Optimize PNGs",
-      "command": "optipng %F",
-      "mimeTypes": ["image/png"],
-      "selection": "any"
-    },
-    {
-      "label": "New note here",
-      "command": "gnome-text-editor \"$(mktemp %d/note-XXXX.md)\"",
-      "selection": "none"
-    }
-  ]
-}
-```
-
-Each action needs a `label` and a `command`; the rest are optional and control
-when the action appears:
-
-| Field         | Meaning                                                            | Default |
-| ------------- | ----------------------------------------------------------------- | ------- |
-| `selection`   | `none` (empty area), `single`, `multiple`, or `any` selected item | `any`   |
-| `mimeTypes`   | only when every selected item matches one of these globs          | any     |
-| `extensions`  | only when every selected item has one of these extensions         | any     |
-| `directories` | set to `false` to hide when a folder is selected                  | `true`  |
-| `files`       | set to `false` to hide when a regular file is selected            | `true`  |
-
-The `command` runs through `/bin/sh` from the current folder, with these tokens
-substituted (each safely shell-quoted):
-
-| Token | Expands to             | Token | Expands to           |
-| ----- | ---------------------- | ----- | -------------------- |
-| `%f`  | first selected path    | `%F`  | all selected paths   |
-| `%u`  | first selected URI     | `%U`  | all selected URIs    |
-| `%n`  | first selected name    | `%N`  | all selected names   |
-| `%d`  | current folder path    | `%%`  | a literal `%`        |
-
-With nothing selected, `%f`/`%F`/`%u`/`%U` fall back to the current folder. The
-file is re-read every time you open the context menu, so edits take effect
-without restarting Mariner.
 
 ## Contributing
 

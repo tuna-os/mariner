@@ -9,6 +9,7 @@ same Adw/Gtk widgets Nautilus does, so the UI matches closely.
 
 ```sh
 npm install          # installs node-gtk + typescript/@types/node
+npm test             # runs unit tests (node --test tests/*.test.ts)
 npm start            # node --import node-gtk/register src/main.ts
 npm run typecheck    # tsc --noEmit
 ```

@@ -41,20 +41,22 @@ jobs:
           flatpak install --user -y tuna-os org.tunaos.mariner
           flatpak info --user org.tunaos.mariner
 
-      # A file manager photographed against an empty home directory shows an
-      # empty window. Give it something ordinary to display.
-      - name: Give the file manager something to show
+      # Photographed against the runner's real home, the window showed
+      # "actions-runner" and "work" alongside the ordinary folders -- the CI
+      # environment leaking into a picture meant for an app store. Stage a
+      # home of our own instead, so the screenshot is both clean and the same
+      # every run rather than whatever the runner image happens to contain.
+      - name: Stage a home directory to photograph
         run: |
-          mkdir -p ~/Documents ~/Pictures ~/Downloads ~/Music ~/Videos
-          mkdir -p ~/Documents/{Invoices,Notes,Reports}
-          for f in budget.ods notes.md report.pdf slides.odp README.txt; do
-            head -c 4096 /dev/urandom > ~/Documents/"$f"
-          done
+          mkdir -p /tmp/demo-home/{Documents,Downloads,Music,Pictures,Videos}
+          mkdir -p /tmp/demo-home/Documents/{Invoices,Notes,Reports}
 
       - uses: tuna-os/flatpak-index/.github/actions/capture-screenshots@claude/sweet-gauss-5h3cma
         with:
-          # --socket=x11 so the sandbox can see the Xvfb the action started.
-          command: flatpak run --user --socket=x11 org.tunaos.mariner
+          # --socket=x11 so the sandbox can see the Xvfb the action started;
+          # HOME redirected into the staged directory, which the sandbox also
+          # needs --filesystem access to in order to read.
+          command: flatpak run --user --socket=x11 --filesystem=/tmp/demo-home --env=HOME=/tmp/demo-home org.tunaos.mariner
           name: main-window
           out-dir: docs/screenshots
           settle: "10"

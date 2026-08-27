@@ -51,7 +51,7 @@ jobs:
           mkdir -p /tmp/demo-home/{Documents,Downloads,Music,Pictures,Videos}
           mkdir -p /tmp/demo-home/Documents/{Invoices,Notes,Reports}
 
-      - uses: tuna-os/flatpak-index/.github/actions/capture-screenshots@claude/sweet-gauss-5h3cma
+      - uses: tuna-os/flatpak-index/.github/actions/capture-screenshots@main
         with:
           # --socket=x11 so the sandbox can see the Xvfb the action started;
           # HOME redirected into the staged directory, which the sandbox also

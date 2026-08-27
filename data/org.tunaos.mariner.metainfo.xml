@@ -45,6 +45,25 @@
 
   <content_rating type="oars-1.1"/>
 
+  <!-- Stores use these to tint the app's page and its placeholder tile before
+       any screenshot loads. Without them Mariner renders as flat grey. -->
+  <branding>
+    <color type="primary" scheme_preference="light">#c0bfbc</color>
+    <color type="primary" scheme_preference="dark">#3d3846</color>
+  </branding>
+
+  <!-- Lets a store say "works on your device" instead of "Desktop Only". The
+       adaptive Adwaita layout goes down to a phone-width window. -->
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
   <releases>
     <release version="0.0.1" date="2026-07-01">
       <description>

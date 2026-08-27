@@ -1,125 +1,37 @@
 name: Publish Flatpak
 
-# Each architecture builds natively on its own runner rather than cross-building
-# under QEMU.
-#
-# The build body runs inside the flatpak-builder container, and flatpak-builder
-# runs each module's commands under bwrap against the target architecture's
-# runtime. On an x86_64 host with no binfmt_misc/qemu-user registration, the
-# very first aarch64 module command fails immediately:
-#
-#     bwrap: execvp /bin/sh: Exec format error
-#
-# Registering binfmt from within this workflow is not practical:
-# binfmt_misc is a host-kernel facility, docker/setup-qemu-action drives it via
-# `docker run --privileged`, and there is no Docker CLI or socket inside the
-# flatpak-builder container. Every step of a job with `container:` runs inside
-# that container, so there is no pre-container hook to register it from, and a
-# separate setup job would register binfmt on a different runner VM entirely.
-#
-# Native arm64 runners sidestep all of that, and keep the aarch64 leg roughly as
-# fast as the x86_64 one instead of paying emulation overhead on the p7zip,
-# unrar and node-gtk native builds. Mirrors tuna-os/gtk-office-suite and
-# tuna-os/finupdate, which build their Flatpaks the same way.
+# Build/publish body lives in tuna-os/.github's reusable publish-flatpak.yml
+# (tunaos#1183 recommendation #2) -- this file just keeps mariner's own
+# trigger policy, which genuinely differs from other tuna-os app repos:
+# PR-triggered build-only validation, so a broken aarch64 leg can't merge to
+# master without being caught (see tunaos history: one stayed red 5 weeks).
 
 on:
   push:
     branches: [master]
     tags: ['v*']
-  # Build-only validation for PRs that touch the build. Nothing here published
-  # to GHCR until it was already on master, which is how a broken aarch64 leg
-  # stayed red for five weeks without anything catching it pre-merge. The
-  # publish job below is gated off for this event.
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Push to GHCR and update the central index (leave off for a build-only validation run)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
   packages: write
 
 jobs:
-  build:
-    name: Build (${{ matrix.arch }})
-    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    strategy:
-      # Keep one arch's failure from cancelling the other, so a break specific
-      # to a single architecture is visible on its own.
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
-      options: --privileged
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build ${{ matrix.arch }}
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          manifest-path: org.tunaos.mariner.json
-          cache-key: flatpak-builder-${{ github.sha }}-${{ matrix.arch }}
-          build-bundle: false
-          upload-artifact: false
-          arch: ${{ matrix.arch }}
-
-      - name: Export ${{ matrix.arch }} OCI
-        run: |
-          flatpak build-bundle --oci --arch=${{ matrix.arch }} \
-            repo mariner-${{ matrix.arch }}.oci org.tunaos.mariner
-
-      - name: Upload OCI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mariner-${{ matrix.arch }}-oci
-          path: mariner-${{ matrix.arch }}.oci/
-          retention-days: 1
-
   publish:
-    name: Publish
-    needs: build
-    # Never publish from a pull request: this pushes :latest-* to GHCR and
-    # commits to tuna-os/docs, and PR branches (including fork branches) must
-    # not be able to do either.
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: mariner-x86_64-oci
-          # upload-artifact flattens a single-directory `path` to the artifact
-          # root, so each arch must be downloaded into its own subdirectory --
-          # sending both to the same path would leave one arch's
-          # index.json/blobs tree overwriting the other's.
-          path: mariner-x86_64.oci
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: mariner-aarch64-oci
-          path: mariner-aarch64.oci
-
-      - name: Push to GHCR
-        run: |
-          echo "${{ env.GITHUB_TOKEN }}" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
-          skopeo copy oci:mariner-x86_64.oci docker://ghcr.io/tuna-os/mariner:latest-x86_64
-          skopeo copy oci:mariner-aarch64.oci docker://ghcr.io/tuna-os/mariner:latest-aarch64
-
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Update index (x86_64)
-        uses: tuna-os/.github/.github/actions/publish-flatpak-index@main
-        with:
-          oci-dir: mariner-x86_64.oci
-          repo-name: tuna-os/mariner
-          tags: latest
-          token: ${{ secrets.FLATPAK_INDEX_TOKEN }}
-
-      - name: Update index (aarch64)
-        uses: tuna-os/.github/.github/actions/publish-flatpak-index@main
-        with:
-          oci-dir: mariner-aarch64.oci
-          repo-name: tuna-os/mariner
-          tags: latest
-          token: ${{ secrets.FLATPAK_INDEX_TOKEN }}
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@main
+    with:
+      app-id: org.tunaos.mariner
+      manifest-path: org.tunaos.mariner.json
+      repo-name: tuna-os/mariner
+      # Not `A && B || C` -- if B (inputs.publish) is false, that's falsy,
+      # so `||` would silently fall through to C and publish anyway. Confirmed
+      # by testing: a workflow_dispatch with publish=false still published.
+      publish: ${{ (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+    secrets: inherit

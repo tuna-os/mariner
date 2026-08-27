@@ -45,6 +45,17 @@
 
   <content_rating type="oars-1.1"/>
 
+  <!-- 1000x700 is Flathub's maximum for a non-HiDPI screenshot. Regenerated
+       by .github/workflows/screenshots.yml, which photographs the published
+       Flatpak; the image is committed deliberately rather than pushed by CI,
+       so a bad capture cannot publish itself unreviewed. -->
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/tuna-os/mariner/master/docs/screenshots/main-window.png</image>
+      <caption>Browsing the home folder in grid view</caption>
+    </screenshot>
+  </screenshots>
+
   <!-- Stores use these to tint the app's page and its placeholder tile before
        any screenshot loads. Without them Mariner renders as flat grey. -->
   <branding>

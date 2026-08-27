@@ -61,6 +61,11 @@ jobs:
           out-dir: docs/screenshots
           settle: "10"
 
+      # Uploaded for review, deliberately NOT committed by CI. An unreviewed
+      # auto-commit is how a bad capture publishes itself: dualcut's captures
+      # intermittently carry a codec-error toast that only shows up by
+      # looking at the image. The committed PNG is updated by a human (or an
+      # agent) who has seen this artifact.
       - uses: actions/upload-artifact@v7
         with:
           name: screenshots

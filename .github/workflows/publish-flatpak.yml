@@ -25,9 +25,7 @@ permissions:
 
 jobs:
   publish:
-    # TEMP: pinned to the validation branch while tuna-os/.github#41 is
-    # unmerged. Switch to @main once that lands.
-    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@feat/reusable-publish-flatpak
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@main
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json

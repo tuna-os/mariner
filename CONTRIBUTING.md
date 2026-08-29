@@ -10,6 +10,7 @@ same Adw/Gtk widgets Nautilus does, so the UI matches closely.
 ```sh
 npm install          # installs node-gtk + typescript/@types/node
 npm start            # node --import node-gtk/register src/main.ts
+npm test             # runs the Node test suite in tests/
 npm run typecheck    # tsc --noEmit
 ```
 
@@ -20,6 +21,17 @@ typelibs (`Gtk-4.0`, `Adw-1`).
 > The `pnpm-workspace.yaml` override links `node-gtk` to a sibling `../node-gtk`
 > checkout for developing the two together; a plain `npm install` pulls
 > `node-gtk` from the npm registry instead.
+
+Before submitting a change, run both validation commands:
+
+```sh
+npm test
+npm run typecheck
+```
+
+`npm test` runs the service and core-logic tests under `tests/` using Node's
+built-in test runner. UI changes still need a manual launch with `npm start`
+because the automated suite does not exercise GTK widgets.
 
 ## Architecture
 

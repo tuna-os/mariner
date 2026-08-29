@@ -58,8 +58,10 @@ function extractArgv(path: string, dest: string): string[] | null {
 function compressArgv(format: ArchiveFormat, out: string, names: string[]): string[] {
   switch (format) {
     case 'zip': return ['zip', '-r', out, ...names]
-    case 'tar.gz': return ['tar', '-czf', out, ...names]
-    case 'tar.xz': return ['tar', '-cJf', out, ...names]
+    // `names` come from the filesystem and may begin with '-'.  Terminate
+    // tar's option parsing so a crafted filename cannot become a tar option.
+    case 'tar.gz': return ['tar', '-czf', out, '--', ...names]
+    case 'tar.xz': return ['tar', '-cJf', out, '--', ...names]
     case '7z': return ['7z', 'a', out, ...names]
   }
 }

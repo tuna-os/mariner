@@ -1,0 +1,53 @@
+name: CI
+
+# package.json has declared `test` since the repo was forked, and until now
+# nothing ran it: publish-flatpak builds, screenshots photographs the
+# published app, sync-upstream merges. Type errors were caught only as a
+# side effect of the Flatpak build running `npm run typecheck`, minutes and a
+# lot of unrelated machinery away from the mistake; the unit tests were caught
+# nowhere.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to the Node the Flatpak actually ships (see the nodejs module
+      # in org.tunaos.mariner.json) so the tests run against the runtime
+      # users get. It also has to be >= 22.18, where type stripping became
+      # available without a flag — the tests import src/core/*.ts directly.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.1
+
+      # No install step, deliberately. tests/ imports pure-logic modules from
+      # src/core and src/services, none of which touch node-gtk, so the suite
+      # runs with an empty node_modules in well under a second. Adding an
+      # `npm install` here would pull node-gtk's native build into a job that
+      # does not need it.
+      - name: Run the unit tests
+        run: node --test tests/*.test.ts
+
+  required-checks:
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify required validation passed
+        run: test "${{ needs.test.result }}" = success

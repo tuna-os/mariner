@@ -8,10 +8,12 @@ name: Publish Flatpak
 
 on:
   push:
-    branches: [master]
+    # Both names while the default branch is being renamed master -> main.
+    # Drop `master` once the rename has landed.
+    branches: [main, master]
     tags: ['v*']
   pull_request:
-    branches: [master]
+    branches: [main, master]
   workflow_dispatch:
     inputs:
       publish:

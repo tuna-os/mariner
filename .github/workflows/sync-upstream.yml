@@ -21,7 +21,11 @@ jobs:
       - name: Check out TunaOS Mariner
         uses: actions/checkout@v7
         with:
-          ref: master
+          # Resolved rather than hardcoded, so renaming this repo's default
+          # branch does not silently break the nightly sync. Note the
+          # `upstream/master` references below are romgrk/mariner's branch,
+          # not ours — those stay as they are.
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
       - name: Merge upstream master

@@ -5,8 +5,8 @@
 # Syncs this directory's PKGBUILD + mariner.install into a clone of the AUR repo,
 # regenerates .SRCINFO, commits, and (only when asked) pushes. The app sources
 # themselves are NOT uploaded — the PKGBUILD's source=git+https clones them from
-# GitHub at build time, so make sure your packaging commits are pushed to
-# origin/master first.
+# GitHub at build time, so make sure your packaging commits are pushed to the
+# remote's default branch first.
 #
 # Usage:
 #   ./publish-aur.sh ["commit message"]      # sync + commit, then DRY RUN (no push)
@@ -45,15 +45,37 @@ for f in "${FILES[@]}"; do
   [[ -f "$SRC_DIR/$f" ]] || die "missing $SRC_DIR/$f"
 done
 
-# Warn if the packaging commits aren't on origin/master yet — the AUR build
-# clones the app from GitHub, so unpushed packaging would build stale sources.
+# The remote's default branch, resolved rather than hardcoded, so a rename
+# (master -> main) does not turn the checks below into silent no-ops.
+#
+# origin/HEAD is not set in every clone — `git clone` sets it, but a clone made
+# before the rename keeps pointing at the old name — so refresh it from the
+# remote first, then fall back to whichever of main/master actually exists.
+default_ref() {
+  git -C "$SRC_DIR" remote set-head origin --auto >/dev/null 2>&1 || true
+  local ref
+  ref="$(git -C "$SRC_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" \
+    && { echo "$ref"; return; }
+  for ref in origin/main origin/master; do
+    if git -C "$SRC_DIR" rev-parse --verify --quiet "$ref" >/dev/null; then
+      echo "$ref"
+      return
+    fi
+  done
+  echo origin/main
+}
+
+# Warn if the packaging commits aren't on the remote's default branch yet — the
+# AUR build clones the app from GitHub, so unpushed packaging would build stale
+# sources.
 if git -C "$SRC_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-  # Refresh origin/master so both the pushed-check below and the pkgver we bake
+  # Refresh the remote so both the pushed-check below and the pkgver we bake
   # in (step 2b) reflect what the AUR will actually clone and build.
   git -C "$SRC_DIR" fetch --quiet origin 2>/dev/null \
     || msg "WARNING: could not fetch origin — pushed-check and pkgver may be stale"
-  if ! git -C "$SRC_DIR" diff --quiet origin/master -- "$SRC_DIR" 2>/dev/null; then
-    msg "WARNING: packaging differs from origin/master — did you 'git push' first?"
+  remote_ref="$(default_ref)"
+  if ! git -C "$SRC_DIR" diff --quiet "$remote_ref" -- "$SRC_DIR" 2>/dev/null; then
+    msg "WARNING: packaging differs from ${remote_ref} — did you 'git push' first?"
   fi
 fi
 
@@ -77,11 +99,11 @@ for f in "${FILES[@]}"; do cp "$SRC_DIR/$f" "$WORK_DIR/$f"; done
 #     so shipping the r0.g0000000 placeholder would freeze the AUR listing at
 #     that string forever and users' AUR helpers would never see an update.
 #     Compute the version the same way the PKGBUILD's pkgver() does, but from
-#     origin/master (the exact tree the AUR clones), so every pushed commit
+#     the remote's default branch (the exact tree the AUR clones), so every commit
 #     becomes a real version bump. pkgver() stays in the PKGBUILD and recomputes
 #     the identical value at build time.
 if git -C "$SRC_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-  build_ref=origin/master
+  build_ref="$(default_ref)"
   git -C "$SRC_DIR" rev-parse --verify --quiet "$build_ref" >/dev/null || build_ref=HEAD
   pkgver="$(compute_pkgver "$build_ref")"
   msg "Setting pkgver = $pkgver (from $build_ref)"

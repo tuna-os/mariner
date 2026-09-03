@@ -9,7 +9,8 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    # Both names while the default branch is being renamed master -> main.
+    branches: [main, master]
   pull_request:
   merge_group:
   workflow_dispatch:

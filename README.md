@@ -194,6 +194,7 @@ optional — it enables full-text (in-file) search.
 ```sh
 git clone https://github.com/tuna-os/mariner.git && cd mariner
 npm install      # fetches and builds node-gtk
+npm test         # runs core test suite
 npm start
 ```
 

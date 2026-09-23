@@ -3,9 +3,11 @@ import Gdk from 'gi:Gdk-4.0'
 import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
 import Pango from 'gi:Pango-1.0'
-import { F } from '../core/gio.ts'
 import { HOME } from '../core/format.ts'
+import { archiveName } from '../core/archive-uri.ts'
 import { volumeMonitor } from '../services/volume-monitor.ts'
+import { tagFromUri, HIDDEN_TAGS_NAME } from '../services/tags-service.ts'
+import { tagIconName } from './tag-icons.ts'
 import type { GFile } from '../core/types.ts'
 
 /* Breadcrumb path bar — a faithful port of nautilus's NautilusPathBar
@@ -43,7 +45,7 @@ const DEFAULT_MOD_MASK =
 
 type BtnType =
   | 'normal' | 'root' | 'admin' | 'home' | 'starred' | 'recent'
-  | 'mount' | 'trash' | 'network' | 'computer' | 'burn'
+  | 'mount' | 'trash' | 'network' | 'computer' | 'burn' | 'archive' | 'tag'
 
 interface Crumb {
   type: BtnType
@@ -76,7 +78,7 @@ function mountForRoot(file: GFile): any | null {
   if (!mon) return null
   try {
     for (const m of mon.getMounts())
-      if (F.equal(m.getRoot(), file)) return m
+      if (m.getRoot().equal(file)) return m
   } catch {}
   return null
 }
@@ -86,9 +88,9 @@ function mountForRoot(file: GFile): any | null {
  * a "root" (which stops the ancestor walk — nautilus never shows crumbs above
  * Home, the filesystem root, a mount, trash, recent, …). */
 function classify(file: GFile): Crumb {
-  const path = F.getPath(file)
-  const scheme = (F.getUriScheme(file) || '').toLowerCase()
-  const isSchemeRoot = !F.getParent(file)
+  const path = file.getPath()
+  const scheme = (file.getUriScheme() || '').toLowerCase()
+  const isSchemeRoot = !file.getParent()
 
   if (path === '/')
     return { type: 'root', name: osName(), iconName: ICON_FILESYSTEM, gicon: null, isRoot: true }
@@ -98,6 +100,15 @@ function classify(file: GFile): Crumb {
     return { type: 'recent', name: 'Recent', iconName: 'document-open-recent-symbolic', gicon: null, isRoot: true }
   if (scheme === 'starred')
     return { type: 'starred', name: 'Starred', iconName: 'starred-symbolic', gicon: null, isRoot: true }
+  /* Tag locations: the root crumb is "Tags"; a specific tag renders as a normal
+   * child crumb ("Tags / Pink") with its name decoded from the URI. The
+   * reserved ,hidden child is the Hidden Tags page. */
+  if (scheme === 'tag') {
+    const tag = tagFromUri(file.getUri())
+    if (tag == null)
+      return { type: 'tag', name: 'Tags', iconName: tagIconName(), gicon: null, isRoot: true }
+    return { type: 'normal', name: tag === HIDDEN_TAGS_NAME ? 'Hidden Tags' : tag, iconName: null, gicon: null, isRoot: false }
+  }
 
   const mount = mountForRoot(file)
   if (mount)
@@ -111,10 +122,14 @@ function classify(file: GFile): Crumb {
     return { type: 'network', name: 'Network', iconName: ICON_REMOTE, gicon: null, isRoot: true }
   if (scheme === 'computer' && isSchemeRoot)
     return { type: 'computer', name: 'Computer', iconName: 'computer-symbolic', gicon: null, isRoot: true }
+  /* An archive browsed in place (archive://) — its root is the archive file;
+   * label it with the archive's name and stop the ancestor walk there. */
+  if (scheme === 'archive' && isSchemeRoot)
+    return { type: 'archive', name: archiveName(file) || file.getBasename() || 'Archive', iconName: 'package-x-generic-symbolic', gicon: null, isRoot: true }
   if (scheme === 'burn' && isSchemeRoot)
-    return { type: 'burn', name: F.getBasename(file) || 'CD/DVD Creator', iconName: null, gicon: null, isRoot: true }
+    return { type: 'burn', name: file.getBasename() || 'CD/DVD Creator', iconName: null, gicon: null, isRoot: true }
 
-  return { type: 'normal', name: F.getBasename(file) || '/', iconName: null, gicon: null, isRoot: false }
+  return { type: 'normal', name: file.getBasename() || '/', iconName: null, gicon: null, isRoot: false }
 }
 
 function safeGicon(mount: any): any | null {
@@ -152,11 +167,16 @@ export function createPathBar(handlers: PathBarHandlers): PathBar {
   scrolled.addController(scroll)
 
   /* Auto-scroll to the end so the current folder stays visible. */
-  scrolled.getHadjustment().on('changed', () => {
+  const scrollToEnd = (): void => {
     const last = buttonsBox.getLastChild()
     const vp = scrolled.getChild()
     if (last && vp && vp.scrollTo) { try { vp.scrollTo(last, null) } catch {} }
-  })
+  }
+  scrolled.getHadjustment().on('changed', scrollToEnd)
+  /* The header stack switch (pathbar ↔ location entry) zeroes the viewport's
+   * scroll while the bar is unmapped, without an hadjustment 'changed' on
+   * re-map; re-pin once the new allocation lands. */
+  scrolled.on('map', () => GLib.idleAdd(GLib.PRIORITY_DEFAULT_IDLE, () => { scrollToEnd(); return false }))
 
   /* "view-more" current-folder menu button at the end of the bar. */
   const menuButton = new Gtk.MenuButton({
@@ -297,7 +317,7 @@ export function createPathBar(handlers: PathBarHandlers): PathBar {
       chain.unshift({ file: f, crumb, current: first })
       first = false
       if (crumb.isRoot) break
-      f = F.getParent(f)
+      f = f.getParent()
     }
     for (const c of chain) buttonsBox.append(makeButton(c.file, c.crumb, c.current))
   }

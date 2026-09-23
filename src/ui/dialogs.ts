@@ -1,26 +1,29 @@
 import Gtk from 'gi:Gtk-4.0'
 import Adw from 'gi:Adw-1'
-import { F } from '../core/gio.ts'
+import GLib from 'gi:GLib-2.0'
 import {
   displayName, formatType, formatSize, formatBytes, formatModified, isDirectory,
 } from '../core/format.ts'
 import { measureUsage } from '../core/measure.ts'
 import { createUsageChart } from './disk-usage.ts'
+import { tagsService } from '../services/tags-service.ts'
 import type { GFile, GFileInfo } from '../core/types.ts'
 
 interface PromptOptions {
   heading: string
   body?: string
   value?: string
+  placeholder?: string
   okLabel?: string
   selectBasename?: boolean
 }
 
-/* Text prompt (new folder / rename). Resolves to the string, or null on cancel. */
-export function promptText(parent: any, { heading, body, value = '', okLabel = 'OK', selectBasename = false }: PromptOptions): Promise<string | null> {
+/* Text prompt (new folder / rename / select-by-pattern). Resolves to the string,
+ * or null on cancel. */
+export function promptText(parent: any, { heading, body, value = '', placeholder, okLabel = 'OK', selectBasename = false }: PromptOptions): Promise<string | null> {
   return new Promise<string | null>(resolve => {
     const dialog = new Adw.AlertDialog({ heading, body: body ?? '' })
-    const entry = new Gtk.Entry({ text: value, activatesDefault: true, hexpand: true })
+    const entry = new Gtk.Entry({ text: value, placeholderText: placeholder ?? '', activatesDefault: true, hexpand: true })
     dialog.setExtraChild(entry)
     dialog.addResponse('cancel', 'Cancel')
     dialog.addResponse('ok', okLabel)
@@ -43,6 +46,20 @@ export function promptText(parent: any, { heading, body, value = '', okLabel = '
       if (selectBasename && dot > 0) entry.selectRegion(0, dot)
       else entry.selectRegion(0, -1)
     }
+  })
+}
+
+/* Native folder picker (GTK's FileDialog). Resolves to the chosen folder, or
+ * null if the user cancels. Used by the Trash view's "Restore to…" action. */
+export function chooseFolder(parent: any, opts: { title?: string; initialFolder?: GFile } = {}): Promise<GFile | null> {
+  return new Promise<GFile | null>(resolve => {
+    const dialog = new Gtk.FileDialog({ title: opts.title ?? 'Select Folder', modal: true })
+    if (opts.initialFolder) dialog.setInitialFolder(opts.initialFolder)
+    dialog.selectFolder(parent, null, (_src: any, res: any) => {
+      let folder: GFile | null = null
+      try { folder = dialog.selectFolderFinish(res) } catch { /* cancelled */ }
+      resolve(folder)
+    })
   })
 }
 
@@ -91,18 +108,22 @@ export function showProperties(parent: any, info: GFileInfo, file: GFile, opts: 
 
   const page = new Adw.PreferencesPage()
   const group = new Adw.PreferencesGroup()
+  /* Adw.ActionRow renders its subtitle as Pango markup, so raw data (a filename
+   * or path with & < >, "Read & Write") must be escaped or it fails to parse. */
   const row = (title: string, subtitle: string) => {
-    const r = new Adw.ActionRow({ title, subtitle: String(subtitle || '—') })
+    const r = new Adw.ActionRow({ title, subtitle: GLib.markupEscapeText(String(subtitle || '—'), -1) })
     r.addCssClass('property')
     group.add(r)
   }
   row('Name', displayName(info))
   row('Type', formatType(info))
   if (!isDirectory(info)) row('Size', formatSize(info))
-  const parentDir = F.getParent(file)
-  row('Location', parentDir ? F.getPath(parentDir) : '')
+  const parentDir = file.getParent()
+  row('Location', parentDir ? parentDir.getPath() : '')
   row('Modified', formatModified(info))
   row('Permissions', permString(info))
+  const tagNames = tagsService.tagObjectsOf(file.getUri()).map(t => t.name)
+  if (tagNames.length) row('Tags', tagNames.join(', '))
 
   page.add(group)
 
@@ -111,7 +132,7 @@ export function showProperties(parent: any, info: GFileInfo, file: GFile, opts: 
    * expandable content. Nothing scans on open — pressing Scan (or opening via
    * "Analyze Disk Usage") walks the tree once, filling both the summary and the
    * chart; the walk is cancelled when the dialog closes. */
-  const usagePath = isDirectory(info) ? F.getPath(file) : null
+  const usagePath = isDirectory(info) ? file.getPath() : null
   if (usagePath) {
     dialog.setContentHeight(640)
 

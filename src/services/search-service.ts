@@ -3,16 +3,23 @@ import GLib from 'gi:GLib-2.0'
 import { fileURLToPath } from 'node:url'
 import { EventEmitter } from '../core/emitter.ts'
 import { ProcessStream } from '../core/process-stream.ts'
-import { F, ATTRS, fileForPath } from '../core/gio.ts'
+import { ATTRS, fileForPath } from '../core/gio.ts'
 import { modifiedUnix } from '../core/format.ts'
-import type { GFile, GFileInfo, SearchFilter } from '../core/types.ts'
+import { tagsService } from './tags-service.ts'
+import type { Entry, GFile, GFileInfo, SearchFilter } from '../core/types.ts'
 
 const DOCUMENT_RE = /officedocument|opendocument|msword|pdf|rtf|ebook|epub/
 
-/* Whether a resolved entry passes the rich-search filter (category + date). */
-function matchesFilter(info: GFileInfo, filter: SearchFilter | null): boolean {
+/* Whether a resolved entry passes the rich-search filter (category + date +
+ * tag intersection). The caller heals the tag index from the entry's xattr
+ * first, so tagsOf sees files tagged outside Mariner too. */
+function matchesFilter(info: GFileInfo, file: GFile, filter: SearchFilter | null): boolean {
   if (!filter) return true
   if (filter.since && modifiedUnix(info) < filter.since) return false
+  if (filter.tags?.length) {
+    const have = tagsService.tagsOf(file.getUri())
+    if (!filter.tags.every(t => have.includes(t))) return false
+  }
   const ct = info.getContentType() || ''
   switch (filter.category) {
     case 'folder': return info.getFileType() === Gio.FileType.DIRECTORY
@@ -25,6 +32,12 @@ function matchesFilter(info: GFileInfo, filter: SearchFilter | null): boolean {
 }
 
 const WORKER = fileURLToPath(new URL('../workers/search-worker.ts', import.meta.url))
+
+/* Resolved matches are coalesced over this window and emitted as one batch, so
+ * the view inserts them with a single splice instead of one items-changed per
+ * result — thousands of matches arriving at once would otherwise freeze the UI
+ * (each per-item change is processed by the selection model and both views). */
+const FLUSH_MS = 50
 
 /* ripgrep flags for content search: emit each matching file once, treat the
  * query as a literal case-insensitive substring (mirroring the name search),
@@ -41,7 +54,7 @@ const RG_FLAGS = ['--files-with-matches', '--fixed-strings', '--ignore-case', '-
  *
  * Events:
  *   'start'                      search began
- *   'result'  ({info, file})     a match resolved
+ *   'result'  (Entry[])          a coalesced batch of resolved matches
  *   'end'     (ok)               finished (ok=false if it errored)
  *   'error'   (message)          worker/spawn error
  */
@@ -50,6 +63,8 @@ export class SearchService extends EventEmitter {
   cancellable: any = null
   filter: SearchFilter | null = null
   _contentMode = false
+  _pending: Entry[] = []
+  _flushTimer = 0
 
   get active(): boolean { return this.stream !== null }
 
@@ -59,7 +74,7 @@ export class SearchService extends EventEmitter {
     const token = this.cancellable = new Gio.Cancellable()
     this.emit('start')
 
-    const path = F.getPath(rootDir)
+    const path = rootDir.getPath()
     const wantContent = !!(filter?.contents && query && path)
     this._contentMode = wantContent
 
@@ -75,7 +90,7 @@ export class SearchService extends EventEmitter {
     this.stream = new ProcessStream(argv)
     this.stream.on('line', (line: string) => this._resolve(line, token))
     this.stream.on('error', (msg: string) => this.emit('error', msg))
-    this.stream.on('end', (ok: boolean) => { this.stream = null; this.emit('end', ok) })
+    this.stream.on('end', (ok: boolean) => { this.stream = null; this._flush(); this.emit('end', ok) })
     this.stream.start()
   }
 
@@ -84,16 +99,39 @@ export class SearchService extends EventEmitter {
     if (this._contentMode) { if (!line) return; path = line }
     else { try { path = JSON.parse(line) } catch { return } }
     const file = fileForPath(path)
-    F.queryInfoAsync(file, ATTRS, Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_DEFAULT, token,
+    file.queryInfoAsync(ATTRS, Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_DEFAULT, token,
       (_src: any, res: any) => {
         if (token.isCancelled()) return
         let info
-        try { info = F.queryInfoFinish(file, res) } catch { return }
-        if (matchesFilter(info, this.filter)) this.emit('result', { info, file })
+        try { info = file.queryInfoFinish(res) } catch { return }
+        tagsService.heal(info, file)
+        if (matchesFilter(info, file, this.filter)) this._push({ info, file })
       })
   }
 
+  /* Buffer a resolved match and arm the coalescing flush (see FLUSH_MS). */
+  _push(entry: Entry): void {
+    this._pending.push(entry)
+    if (!this._flushTimer) {
+      this._flushTimer = GLib.timeoutAdd(GLib.PRIORITY_DEFAULT_IDLE, FLUSH_MS, () => {
+        this._flushTimer = 0
+        this._flush()
+        return false
+      })
+    }
+  }
+
+  _flush(): void {
+    if (this._flushTimer) { GLib.sourceRemove(this._flushTimer); this._flushTimer = 0 }
+    if (this._pending.length === 0) return
+    const batch = this._pending
+    this._pending = []
+    this.emit('result', batch)
+  }
+
   cancel() {
+    if (this._flushTimer) { GLib.sourceRemove(this._flushTimer); this._flushTimer = 0 }
+    this._pending = []
     if (this.stream) { this.stream.cancel(); this.stream = null }
     if (this.cancellable) { try { this.cancellable.cancel() } catch {} this.cancellable = null }
   }

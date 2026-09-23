@@ -6,6 +6,10 @@ import { HOME } from '../core/format.ts'
 
 const SIZE = 256                          /* generated thumbnail edge, px */
 const MAX_BYTES = 30 * 1024 * 1024        /* skip generating for huge images */
+/* Bound the working set: one entry per file browsed with no eviction let RSS
+ * climb toward ~1 GB over long sessions. 200 × 256px textures is plenty for
+ * anything on screen plus scrollback. */
+const MAX_ENTRIES = 200
 const CACHE_DIRS = ['large', 'normal'].map(s => `${HOME}/.cache/thumbnails/${s}`)
 
 export interface ThumbRequest {
@@ -31,7 +35,15 @@ export class ThumbnailService {
   /* cb fires synchronously on a cache hit, else when the thumbnail resolves
    * (with null if there is none). */
   request(req: ThumbRequest, cb: Cb): void {
-    if (this._cache.has(req.key)) { cb(this._cache.get(req.key)); return }
+    if (this._cache.has(req.key)) {
+      /* Refresh recency so hot entries survive eviction (Map is
+       * insertion-ordered; re-insert moves the key to the young end). */
+      const hit = this._cache.get(req.key)
+      this._cache.delete(req.key)
+      this._cache.set(req.key, hit)
+      cb(hit)
+      return
+    }
     const waiters = this._waiters.get(req.key)
     if (waiters) { waiters.push(cb); return }
     this._waiters.set(req.key, [cb])
@@ -54,9 +66,19 @@ export class ThumbnailService {
     let texture: any = null
     try { texture = this._fromCache(task.uri) ?? this._generate(task) } catch { texture = null }
     this._cache.set(task.key, texture)
+    this._evict()
     const waiters = this._waiters.get(task.key) ?? []
     this._waiters.delete(task.key)
     for (const cb of waiters) cb(texture)
+  }
+
+  /* Drop oldest-inserted entries past the cap. */
+  _evict(): void {
+    while (this._cache.size > MAX_ENTRIES) {
+      const oldest = this._cache.keys().next()
+      if (oldest.done) break
+      this._cache.delete(oldest.value)
+    }
   }
 
   _fromCache(uri: string): any | null {

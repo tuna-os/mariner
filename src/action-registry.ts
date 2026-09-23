@@ -5,6 +5,8 @@ import { fileForPath } from './core/gio.ts'
 import { HOME } from './core/format.ts'
 import { DEFAULT_ZOOM, ZOOM_STEP } from './window.ts'
 import { aboutDialog } from './ui/dialogs.ts'
+import { editTagDialog, deleteTagDialog } from './ui/new-tag-dialog.ts'
+import { tagsService } from './services/tags-service.ts'
 import { shortcutsDialog } from './ui/shortcuts.ts'
 import { preferencesDialog } from './ui/preferences.ts'
 import { openWithDialog } from './ui/open-with.ts'
@@ -127,4 +129,16 @@ export function buildActions(win: AppWindow): void {
   add('bookmark-open', () => { if (win._ctxFile) win.navigate(win._ctxFile) })
   add('bookmark-open-tab', () => { if (win._ctxFile) win.openTab(win._ctxFile) })
   add('remove-bookmark', () => win._removeBookmark(win._ctxFile))
+
+  /* Tags (implementations live on AppWindow; kept here with the other
+   * registrations per the registry pattern). */
+  add('manage-tags', () => win._manageTags())
+  add('tag-new', () => win._newTag())
+  add('tag-clear', () => win._removeAllTags())
+  add('tag-edit', () => {
+    const tag = win._ctxTag ? tagsService.getTag(win._ctxTag) : null
+    if (tag) editTagDialog(win.window, tag)
+  })
+  add('tag-hide', () => { if (win._ctxTag) tagsService.setTagHidden(win._ctxTag, true) })
+  add('tag-delete', () => { if (win._ctxTag) deleteTagDialog(win.window, win._ctxTag) })
 }

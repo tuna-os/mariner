@@ -306,6 +306,90 @@ export class AppWindow {
   }
 
   /* ---- Actions (registry lives in action-registry.ts) ---- */
+  /* Context menu for a tag row in the sidebar (mirrors the Tags page's ⋮). */
+  showTagMenu(name: string, widget: any, x: number, y: number): void {
+    this._ctxTag = name
+    const menu = Gio.Menu.new()
+    const edit = Gio.Menu.new()
+    edit.append('Edit…', 'win.tag-edit')
+    edit.append('Hide', 'win.tag-hide')
+    menu.appendSection(null, edit)
+    const del = Gio.Menu.new()
+    del.append('Delete', 'win.tag-delete')
+    menu.appendSection(null, del)
+    this._popupMenu(menu, widget, x, y)
+  }
+
+  /* ---- Tags ---- */
+  /* The Tags overview is a location (tag:///), not a dialog. */
+  _manageTags(): void { this.navigate(fileForUri('tag:///')) }
+
+  /* New Tag dialog; when invoked with a selection (the context menu's
+   * "New Tag…"), the created tag is applied to it right away. */
+  async _newTag(): Promise<void> {
+    const files = this._selectedFiles().filter(f => f.getUri().startsWith('file://'))
+    const tag = await newTagDialog(this.window)
+    if (!tag) return
+    if (files.length) {
+      const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
+      tagsService.addTag(files, tag.name)
+      this.undo.push({
+        undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
+        redo: () => tagsService.addTag(files, tag.name),
+        undoLabel: 'Undo Tag Change', redoLabel: 'Redo Tag Change',
+      })
+      this.toast(`Created “${tag.name}” and tagged ${files.length} item${files.length > 1 ? 's' : ''}`, { label: 'Undo', name: 'win.undo' })
+    } else {
+      this.toast(`Created tag “${tag.name}”`)
+    }
+  }
+
+  /* Fallback (no custom menu widgets): stateful boolean actions backing plain
+   * toggle items — checked when EVERY selected file carries the tag (so a
+   * mixed selection toggles ON first). Rebuilt per popup; stale actions from
+   * the previous popup removed. */
+  _buildTagActions(files: GFile[]): TagMenuItem[] {
+    const tags = tagsService.visibleTags()
+    for (let i = 0; i < this._tagActionCount; i++) {
+      try { this.window.removeAction('tag-toggle-' + i) } catch {}
+      delete this._actions['tag-toggle-' + i]
+    }
+    this._tagActionCount = tags.length
+    return tags.map((t, i) => {
+      const name = 'tag-toggle-' + i
+      const state = files.length > 0 && files.every(f => tagsService.tagsOf(f.getUri()).includes(t.name))
+      const a = Gio.SimpleAction.newStateful(name, null, GLib.Variant.newBoolean(state))
+      a.on('change-state', () => this._toggleTag(files, t.name))
+      this.window.addAction(a)
+      this._actions[name] = a
+      return { label: t.name, action: 'win.' + name }
+    })
+  }
+
+  _toggleTag(files: GFile[], tag: string): void {
+    if (!files.length) return
+    const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
+    tagsService.toggleTag(files, tag)
+    this.undo.push({
+      undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
+      redo: () => tagsService.toggleTag(files, tag),
+      undoLabel: 'Undo Tag Change', redoLabel: 'Redo Tag Change',
+    })
+  }
+
+  _removeAllTags(): void {
+    const files = this._selectedFiles().filter(f => tagsService.tagsOf(f.getUri()).length)
+    if (!files.length) return
+    const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
+    tagsService.removeAllTags(files)
+    this.undo.push({
+      undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
+      redo: () => tagsService.removeAllTags(files),
+      undoLabel: 'Undo Remove Tags', redoLabel: 'Redo Remove Tags',
+    })
+    this.toast(`Removed tags from ${files.length} item${files.length > 1 ? 's' : ''}`, { label: 'Undo', name: 'win.undo' })
+  }
+
   /* Analyze disk usage of the selected folder (or the current location): opens
    * Properties with the "Disk Usage" chart pre-expanded. Local paths only. */
   _diskUsage(): void {

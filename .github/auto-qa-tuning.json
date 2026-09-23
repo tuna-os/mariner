@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "note": "Quality thresholds for tuna-os/mariner. Thresholds are declared here and reviewed on a cadence (human-in-the-loop tuning); automated enforcement beyond the required CI gates is future work.",
+  "gates": {
+    "unit_tests": {
+      "workflow": "CI",
+      "job": "Unit tests",
+      "required": true
+    },
+    "coverage": {
+      "artifact": "unit-coverage-<sha>",
+      "line_floor_percent": 99.0,
+      "baseline_percent": 99.57,
+      "baseline_date": "2026-09-23",
+      "enforced": false
+    },
+    "typecheck": {
+      "via": "Publish Flatpak workflow, mariner module (npm run typecheck)",
+      "required": true
+    }
+  },
+  "tuning": {
+    "cadence": "quarterly, or when a gate fails spuriously twice",
+    "rules": [
+      "Raise line_floor_percent toward 100 as suites grow; never lower it to make CI pass.",
+      "A coverage drop below the floor blocks on investigation, not on the number alone — check whether the new code is genuinely untestable headless first."
+    ]
+  }
+}

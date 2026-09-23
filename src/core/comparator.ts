@@ -13,7 +13,7 @@ export function makeComparator(key: SortKey, desc: boolean): Comparator {
     if (ad !== bd) return ad ? -1 : 1   /* folders first, regardless of order */
     let r = 0
     switch (key) {
-      case 'size': r = a.getSize() - b.getSize(); break
+      case 'size': r = Number(a.getSize()) - Number(b.getSize()); break
       case 'type': r = collate(a.getContentType() || '', b.getContentType() || ''); break
       case 'modified': r = modifiedUnix(a) - modifiedUnix(b); break
       default: r = 0

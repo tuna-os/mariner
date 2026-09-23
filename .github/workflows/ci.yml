@@ -42,8 +42,20 @@ jobs:
       # runs with an empty node_modules in well under a second. Adding an
       # `npm install` here would pull node-gtk's native build into a job that
       # does not need it.
-      - name: Run the unit tests
-        run: node --test tests/*.test.ts
+      # V8 coverage (lcov + HTML report) is uploaded as an artifact so unit
+      # coverage for the exact revision is reproducible from CI. Retention is
+      # the 90-day default, pinned explicit for auditability.
+      - name: Run the unit tests with coverage
+        env:
+          NODE_V8_COVERAGE: coverage
+        run: node --test --experimental-test-coverage tests/*.test.ts
+
+      - name: Upload unit coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-coverage-${{ github.sha }}
+          path: coverage/
+          retention-days: 90
 
   required-checks:
     if: always()

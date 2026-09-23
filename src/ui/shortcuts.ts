@@ -29,6 +29,7 @@ const SECTIONS: Section[] = [
   ] },
   { title: 'Select', items: [
     ['Select All', '<Primary>a'],
+    ['Select Items Matching', '<Primary>s'],
     ['Invert Selection', '<Primary><Shift>i'],
   ] },
   { title: 'View', items: [
@@ -40,6 +41,7 @@ const SECTIONS: Section[] = [
     ['Refresh View', 'F5 <Primary>r'],
     ['Show/Hide Hidden Files', '<Primary>h'],
     ['Show/Hide Sidebar', 'F9'],
+    ['Dismiss Command Output', 'Escape'],
   ] },
   { title: 'Navigation', items: [
     ['Go Back', '<Alt>Left'],

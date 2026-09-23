@@ -5,13 +5,40 @@
   "type": "module",
   "description": "Mariner — a GNOME Files clone built with node-gtk + TypeScript",
   "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tuna-os/mariner.git"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
   "main": "src/main.ts",
+  "bundle": {
+    "name": "Mariner",
+    "id": "org.tunaos.mariner",
+    "summary": "Browse and manage your files",
+    "gtk": 4,
+    "flatpak": {
+      "runtimeVersion": "50",
+      "finishArgs": [
+        "--filesystem=host",
+        "--talk-name=org.gtk.vfs.*",
+        "--filesystem=xdg-run/gvfsd",
+        "--talk-name=org.freedesktop.Flatpak"
+      ],
+      "lintExceptions": {
+        "finish-args-host-filesystem-access": "Mariner is a file manager; browsing and managing the whole filesystem is its core function, same as other file managers on Flathub.",
+        "finish-args-flatpak-spawn-access": "Open in Terminal / the location bar's !!command feature launch the user's terminal emulator on the host in the current folder — host terminals are not visible inside the sandbox."
+      }
+    }
+  },
   "bin": {
-    "mariner": "bin/mariner.js"
+    "mariner": "bin/mariner"
   },
   "files": [
     "bin",
-    "src"
+    "src",
+    "data"
   ],
   "scripts": {
     "start": "node --import node-gtk/register src/main.ts",
@@ -19,7 +46,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "node-gtk": "^4.0.1"
+    "node-gtk": "^4.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

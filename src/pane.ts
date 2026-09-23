@@ -4,10 +4,17 @@ import { createComputerView } from './ui/computer.ts'
 import type { ComputerView } from './ui/computer.ts'
 import { DirectoryService } from './services/directory-service.ts'
 import { SearchService } from './services/search-service.ts'
+import { TagLocationService } from './services/tag-location-service.ts'
+import { isTagUri, tagFromUri, HIDDEN_TAGS_NAME } from './services/tags-service.ts'
+import { dirSizes } from './services/dir-size-service.ts'
+import { isDirectory } from './core/format.ts'
+import { createTagsView } from './ui/tags-view.ts'
+import type { TagsView } from './ui/tags-view.ts'
 import { COMPUTER_URI } from './services/places-service.ts'
 import { History } from './core/navigation.ts'
 import { recordFolderVisit } from './services/recent-folders.ts'
-import { F, fileForUri } from './core/gio.ts'
+import { fileForUri } from './core/gio.ts'
+import { archiveFileOf, isArchiveLocation } from './core/archive-uri.ts'
 import type { Entry, GFile, GFileInfo, Prefs, ViewConfig, SearchFilter } from './core/types.ts'
 
 /* A single browsing pane: binds a DirectoryService + SearchService to one
@@ -22,6 +29,8 @@ export class Pane {
   paneStack: any
   dir: DirectoryService
   search: SearchService
+  tagLoc: TagLocationService
+  tagsView: TagsView
   history: History
   location: GFile | null = null
   searching = false
@@ -49,6 +58,7 @@ export class Pane {
     this.view.onDropFiles = (files, targetDir) => this.onDropFiles(files, targetDir)
     this.view.onPreview = () => this.onPreview()
     this.view.onFocusIn = () => this.onFocused()
+    this.view.onSearchStop = () => this._stopSearch()
     this.view.isCutFile = f => this.isCutFile(f)
 
     /* The Computer interface (computer:///) lives alongside the file view in a
@@ -57,12 +67,20 @@ export class Pane {
     this.computer = createComputerView()
     this.computer.onActivate = file => this.navigate(file)
     this.computer.onContextMenu = (file, w, x, y) => this.onDriveContextMenu(file, w, x, y)
+
+    /* The Tags overview (tag:/// and tag:///,hidden) also lives in the stack.
+     * Rows/buttons navigate this pane (a tag's location, the hidden page). */
+    this.tagsView = createTagsView()
+    this.tagsView.onNavigate = file => this.navigate(file)
+
     this.paneStack = new Gtk.Stack()
     this.paneStack.addNamed(this.view.widget, 'files')
     this.paneStack.addNamed(this.computer.widget, 'computer')
+    this.paneStack.addNamed(this.tagsView.widget, 'tags')
 
     this.dir = new DirectoryService()
     this.search = new SearchService()
+    this.tagLoc = new TagLocationService()
     this.history = new History()
 
     this._wire()
@@ -72,28 +90,59 @@ export class Pane {
   get canGoBack(): boolean { return this.history.canGoBack }
   get canGoForward(): boolean { return this.history.canGoForward }
   get parent(): GFile | null {
-    const p = F.getParent(this.location)
+    /* A tag's parent is the all-tags root (GFile's generic URI parenting isn't
+     * reliable for the virtual scheme). */
+    const uri = this.location ? this.location.getUri() : ''
+    if (isTagUri(uri)) return uri.replace(/^tag:\/*/, '').length ? fileForUri('tag:///') : null
+    const p = this.location.getParent()
     if (p) return p
     /* The Computer view sits above the filesystem root, so Up from "/" lands
      * there (and enables the Up button at "/"). */
-    if (this.location && F.getPath(this.location) === '/') return fileForUri(COMPUTER_URI)
+    if (this.location && this.location.getPath() === '/') return fileForUri(COMPUTER_URI)
+    /* Up from an archive's root leaves the archive, landing on the folder that
+     * contains the archive file. */
+    const archive = this.location && archiveFileOf(this.location)
+    if (archive) return archive.getParent()
     return null
   }
-  get searchActive(): boolean { return !!this.searchQuery || this.searchFilter.category !== 'all' || this.searchFilter.since > 0 }
+  get searchActive(): boolean {
+    return !!this.searchQuery || this.searchFilter.category !== 'all' || this.searchFilter.since > 0
+      || (this.searchFilter.tags?.length ?? 0) > 0
+  }
   get isShowingSearch(): boolean { return this.searching && this.searchActive }
 
   _wire(): void {
     this.dir.on('loading', () => { this.view.configure(this._dirConfig()); this.view.beginLoading() })
     this.dir.on('items', (batch: GFileInfo[]) => this.view.addEntries(
-      batch.map((info): Entry => ({ info, file: F.getChild(this.location, info.getName()) }))))
-    this.dir.on('ready', () => this.view.finishLoading('folder'))
+      batch.map((info): Entry => ({ info, file: this.location.getChild(info.getName()) }))))
+    this.dir.on('ready', () => { this.view.finishLoading('folder'); this.queueDirSizes() })
     this.dir.on('error', (msg: string) => this.view.showError(msg))
     this.dir.on('invalidated', () => { if (!this.isShowingSearch) this.dir.load(this.location) })
 
-    this.search.on('start', () => { this.view.configure(this._searchConfig()); this.view.beginLoading() })
-    this.search.on('result', (pair: Entry) => this.view.addEntries([pair]))
-    this.search.on('end', () => { if (this.isShowingSearch) this.view.finishLoading('search') })
-    this.search.on('error', (msg: string) => this.view.showError(msg))
+    this.search.on('start', () => { this.view.configure(this._searchConfig()); this.view.beginLoading(); this.view.showSearchProgress() })
+    this.search.on('result', (batch: Entry[]) => this.view.addEntries(batch))
+    this.search.on('end', () => { this.view.hideSearchProgress(); if (this.isShowingSearch) this.view.finishLoading('search') })
+    this.search.on('error', (msg: string) => { this.view.hideSearchProgress(); this.view.showError(msg) })
+
+    this.tagLoc.on('loading', () => { this.view.configure(this._dirConfig()); this.view.beginLoading() })
+    this.tagLoc.on('items', (batch: Entry[]) => this.view.addEntries(batch))
+    this.tagLoc.on('ready', () => { if (this.isTagLocation) { this.view.finishLoading('folder'); this.queueDirSizes() } })
+  }
+
+  /* Queue folder-size scans for the displayed listing, in view order (see
+   * dir-size-service.ts — the queue is replaced wholesale, so the listing the
+   * user is looking at always scans first). Called when a listing finishes
+   * loading, and by the window when the feature is toggled on or this pane's
+   * tab becomes active. */
+  queueDirSizes(): void {
+    if (!dirSizes.enabled) return
+    const paths: string[] = []
+    for (const { info, file } of this.view.entries()) {
+      if (!isDirectory(info)) continue
+      const path = file?.getPath()
+      if (path) paths.push(path)
+    }
+    dirSizes.scanListing(paths)
   }
 
   _dirConfig(): ViewConfig {
@@ -109,22 +158,41 @@ export class Pane {
   }
 
   /* ---- navigation ---- */
-  get isComputer(): boolean { return !!this.location && F.getUri(this.location).startsWith('computer:') }
+  get isComputer(): boolean { return !!this.location && this.location.getUri().startsWith('computer:') }
+  get isTrash(): boolean { return !!this.location && this.location.getUri().startsWith('trash:') }
+  get isTagLocation(): boolean { return !!this.location && isTagUri(this.location.getUri()) }
 
   navigate(file: GFile, push = true): void {
     this._exitSearch()
     if (push && this.location) this.history.visit(this.location)
     this.location = file
-    recordFolderVisit(F.getUri(file))
+    this._recordVisit(file)
     this._load(file)
     this.onChanged()
   }
+
+  /* Archive:// mounts are transient (and their double-escaped URIs unsightly),
+   * so keep them out of the recent-folders / "jump to folder" history. Tag
+   * locations too: they aren't folders, and a rename would strand the URI. */
+  _recordVisit(file: GFile): void {
+    if (!isArchiveLocation(file) && !isTagUri(file.getUri())) recordFolderVisit(file.getUri())
+  }
+
+  /* Select the given item URIs once the current folder finishes streaming in
+   * (org.freedesktop.FileManager1 ShowItems / "Show in folder"). Set right after
+   * a navigate() so the reveal is armed before the async batches arrive. */
+  revealAfterLoad(uris: string[]): void { this.view.setPendingReveal(uris) }
 
   back(): void { this._go(this.history.goBack(this.location)) }
   forward(): void { this._go(this.history.goForward(this.location)) }
   up(): void { const p = this.parent; if (p) this.navigate(p) }
   reload(): void {
     if (this.isComputer) this.computer.refresh()
+    else if (this.isTagLocation) {
+      const tag = tagFromUri(this.location.getUri())
+      if (tag == null || tag === HIDDEN_TAGS_NAME) this.tagsView.refresh()
+      else this.tagLoc.load(this.location)
+    }
     else this.isShowingSearch ? this._runSearch() : this.dir.load(this.location)
   }
 
@@ -132,18 +200,34 @@ export class Pane {
     if (!file) return
     this._exitSearch()
     this.location = file
-    recordFolderVisit(F.getUri(file))
+    this._recordVisit(file)
     this._load(file)
     this.onChanged()
   }
 
-  /* Show the location: the Computer interface for computer:///, otherwise load
-   * the directory into the file view. */
+  /* Show the location: the Computer interface for computer:///, a tag listing
+   * for tag://, otherwise load the directory into the file view. */
   _load(file: GFile): void {
-    if (F.getUri(file).startsWith('computer:')) {
+    const uri = file.getUri()
+    if (uri.startsWith('computer:')) {
       this.computer.refresh()
       this.paneStack.setVisibleChildName('computer')
+    } else if (isTagUri(uri)) {
+      this.dir.cancel()   /* stop the previous folder's monitor/enumeration */
+      const tag = tagFromUri(uri)
+      if (tag == null || tag === HIDDEN_TAGS_NAME) {
+        /* The root (tag:///) is the Tags overview; ,hidden its hidden page. */
+        this.tagLoc.cancel()
+        this.tagsView.setMode(tag === HIDDEN_TAGS_NAME)
+        this.tagsView.refresh()
+        this.paneStack.setVisibleChildName('tags')
+      } else {
+        this.paneStack.setVisibleChildName('files')
+        this.view.prepareForNavigation()
+        this.tagLoc.load(file)
+      }
     } else {
+      this.tagLoc.cancel()
       this.paneStack.setVisibleChildName('files')
       this.view.prepareForNavigation()
       this.dir.load(file)
@@ -159,7 +243,18 @@ export class Pane {
    * off) should land on the panel, not the header. */
   endSearch(): void { if (!this.searching) return; this._exitSearch(); this.view.prepareForNavigation(); this.dir.load(this.location) }
 
-  _exitSearch(): void { this.searching = false; this.searchQuery = ''; this.search.cancel() }
+  _exitSearch(): void { this.searching = false; this.searchQuery = ''; this.search.cancel(); this.view.hideSearchProgress() }
+
+  /* The floating "Searching…" bar's Cancel button: stop the running search but
+   * keep the matches found so far and stay in search mode, like nautilus's stop.
+   * finishLoading settles the partial results (and shows the empty state if
+   * nothing matched yet) since a cancelled stream emits no 'end'. */
+  _stopSearch(): void {
+    if (!this.search.active) return
+    this.search.cancel()
+    this.view.hideSearchProgress()
+    if (this.isShowingSearch) this.view.finishLoading('search')
+  }
 
   _runSearch(): void {
     if (this.searchActive) {
@@ -178,6 +273,7 @@ export class Pane {
       this.search.search(this.location, this.searchQuery, { showHidden: this.prefs.showHidden, filter: this.searchFilter })
     } else {
       this.search.cancel()
+      this.view.hideSearchProgress()
       this.dir.load(this.location)   /* empty query + no filter → show the current folder */
     }
   }
@@ -186,7 +282,7 @@ export class Pane {
   applyPrefs(): void {
     this.view.setMode(this.prefs.viewMode)
     this.view.setZoom(this.prefs.iconSize)
-    this.view.setColumns(this.prefs.columns)
+    this.view.setColumns(this.prefs.columns, this.isTrash)
     if (this.isShowingSearch) {
       this._runSearch()
     } else {
@@ -196,15 +292,17 @@ export class Pane {
   }
 
   /* Just the list-view columns (called when the column chooser applies). */
-  applyColumns(): void { this.view.setColumns(this.prefs.columns) }
+  applyColumns(): void { this.view.setColumns(this.prefs.columns, this.isTrash) }
 
   /* Re-apply view mode + zoom + columns (called after navigation / when made
-   * active) so a tab that wasn't focused when a pref changed catches up. */
+   * active) so a tab that wasn't focused when a pref changed catches up. This
+   * runs on every navigation, so entering/leaving the Trash toggles the
+   * Original Location column here. */
   syncView(): void {
     this.view.setMode(this.prefs.viewMode)
     this.view.setZoom(this.prefs.iconSize)
-    this.view.setColumns(this.prefs.columns)
+    this.view.setColumns(this.prefs.columns, this.isTrash)
   }
 
-  destroy(): void { this.dir.cancel(); this.search.cancel() }
+  destroy(): void { this.dir.cancel(); this.search.cancel(); this.tagLoc.cancel() }
 }

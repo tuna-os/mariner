@@ -1,6 +1,6 @@
 import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
-import { F } from './gio.ts'
+import { archiveName } from './archive-uri.ts'
 import type { GFile, GFileInfo } from './types.ts'
 
 export const HOME: string = GLib.getHomeDir()
@@ -13,9 +13,30 @@ export function displayName(info: GFileInfo): string {
   return info.getDisplayName() || info.getName()
 }
 
+/* Folder sizes are computed by the DirSizeService, which injects its lookups
+ * here at import time (so core stays free of service imports) — the value is
+ * null when the feature is off, the location isn't local, or the size isn't
+ * known yet; `pending` says a scan is queued/running (shown as "…"). */
+let dirSizeLookup = (_info: GFileInfo): number | null => null
+let dirSizePending = (_info: GFileInfo): boolean => false
+export function setDirSizeLookup(fn: (info: GFileInfo) => number | null): void { dirSizeLookup = fn }
+export function setDirSizePending(fn: (info: GFileInfo) => boolean): void { dirSizePending = fn }
+
 export function formatSize(info: GFileInfo): string {
-  if (isDirectory(info)) return ''
+  if (isDirectory(info)) {
+    const bytes = dirSizeLookup(info)
+    if (bytes !== null) return GLib.formatSize(bytes)
+    return dirSizePending(info) ? '…' : ''
+  }
   return GLib.formatSize(info.getSize())
+}
+
+/* Sortable size: files by st_size, folders by their computed recursive size
+ * (unknown folders sort as -1). Folders group before files in the comparator
+ * regardless, so the two scales never actually mix. */
+export function sizeForSort(info: GFileInfo): number {
+  if (isDirectory(info)) return dirSizeLookup(info) ?? -1
+  return Number(info.getSize())
 }
 
 export function formatBytes(bytes: number): string {
@@ -101,11 +122,24 @@ export function modifiedUnix(info: GFileInfo): number {
   try { return Number(dt.toUnix()) } catch { return 0 }
 }
 
+/* Original containing folder of a trashed item (from trash::orig-path), with
+ * $HOME abbreviated to `~`. Empty for non-trash entries. Drives the Trash
+ * view's "Original Location" column. */
+export function formatOrigLocation(info: GFileInfo): string {
+  const orig = info.getAttributeByteString?.('trash::orig-path')
+  if (!orig) return ''
+  const slash = orig.lastIndexOf('/')
+  const dir = slash > 0 ? orig.slice(0, slash) : '/'
+  if (dir === HOME) return '~'
+  if (dir.startsWith(HOME + '/')) return '~' + dir.slice(HOME.length)
+  return dir
+}
+
 /* Path with $HOME abbreviated to `~` (for the command palette's folder list);
  * falls back to the URI for non-local locations (trash:, recent:, mounts). */
 export function tildePath(file: GFile): string {
-  const path = F.getPath(file)
-  if (!path) return F.getUri(file)
+  const path = file.getPath()
+  if (!path) return file.getUri()
   if (path === HOME) return '~'
   if (path.startsWith(HOME + '/')) return '~' + path.slice(HOME.length)
   return path
@@ -113,13 +147,31 @@ export function tildePath(file: GFile): string {
 
 /* Human label for a location (tab title / window title). */
 export function locationName(file: GFile): string {
-  const path = F.getPath(file)
+  const path = file.getPath()
   if (path === HOME) return 'Home'
-  if (path) return F.getBasename(file)
-  const uri = F.getUri(file)
+  const uri = file.getUri()
+  /* Archive locations (archive://) are handled before the path check: the title
+   * is set the moment we navigate — before the backend is mounted — so getPath()
+   * is null then. Sub-folders keep their real basename; the root (basename "/")
+   * shows the archive's filename. */
+  if (uri.startsWith('archive://')) {
+    const name = file.getBasename()
+    return name && name !== '/' ? name : (archiveName(file) ?? '/')
+  }
+  if (path) return file.getBasename()
   if (uri.startsWith('trash:')) return 'Trash'
   if (uri.startsWith('recent:')) return 'Recent'
   if (uri.startsWith('network:')) return 'Network'
   if (uri.startsWith('computer:')) return 'Computer'
-  return F.getBasename(file) || uri
+  /* tag:///<name> — title with the (decoded) tag name; the root is "Tags" and
+   * the reserved ",hidden" child (HIDDEN_TAGS_NAME in tags-service.ts) is the
+   * Hidden Tags page. */
+  if (uri.startsWith('tag:')) {
+    const m = /^tag:\/\/\/(.+)$/.exec(uri)
+    if (!m) return 'Tags'
+    let name: string
+    try { name = decodeURIComponent(m[1]) } catch { name = m[1] }
+    return name === ',hidden' ? 'Hidden Tags' : name
+  }
+  return file.getBasename() || uri
 }

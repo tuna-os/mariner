@@ -1,7 +1,6 @@
 import Gtk from 'gi:Gtk-4.0'
 import Adw from 'gi:Adw-1'
 import { Pane } from './pane.ts'
-import { F } from './core/gio.ts'
 import { locationName } from './core/format.ts'
 import type { AppWindow } from './window.ts'
 import type { GFile, SearchFilter } from './core/types.ts'
@@ -42,6 +41,7 @@ export class Tab {
   get isSplit(): boolean { return this.panes.length > 1 }
 
   navigate(file: GFile, push = true): void { this.activePane.navigate(file, push) }
+  revealAfterLoad(uris: string[]): void { this.activePane.revealAfterLoad(uris) }
   back(): void { this.activePane.back() }
   forward(): void { this.activePane.forward() }
   up(): void { this.activePane.up() }
@@ -67,7 +67,7 @@ export class Tab {
     pane.onPreview = () => { this.setActivePane(pane); this.win.togglePreview(this) }
     pane.onDriveContextMenu = (file, w, x, y) => { this.setActivePane(pane); this.win.showDriveMenu(file, w, x, y) }
     pane.onFocused = () => this.setActivePane(pane)
-    pane.isCutFile = f => this.win._cutUris.has(F.getUri(f))
+    pane.isCutFile = f => this.win._cutUris.has(f.getUri())
     pane.onChanged = () => {
       pane.syncView()
       if (pane === this.activePane) { this.page.setTitle(locationName(pane.location)); this.win.onTabChanged(this) }

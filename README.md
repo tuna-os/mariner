@@ -1,6 +1,10 @@
-<h1 align="center">
-  Mariner
-</h1>
+<div align="center">
+  <img src="data/icons/hicolor/scalable/apps/io.github.romgrk.Mariner.svg" alt="Mariner icon" width="96" />
+ 
+  <h1 align="center">
+    Mariner
+  </h1>
+</div>
 
 <p align="center">
   <b>GNOME Files, plus everything the issue tracker rejected.</b>
@@ -19,7 +23,7 @@ Mariner is a GTK4 + libadwaita file manager for the GNOME desktop. It
 drives the same widgets as [GNOME Files](https://gitlab.gnome.org/GNOME/nautilus)
 (Nautilus), so it looks and behaves like home — then adds type-to-select find,
 dual-pane browsing, a Quick Look preview, a command palette, full-text search,
-and a built-in disk analyzer on top.
+file tags, and a built-in disk analyzer on top.
 
 <p align="center">
   <img src="docs/hero.png" alt="Mariner main window" width="820">
@@ -42,8 +46,10 @@ one app that still looks like stock GNOME.
 
 ### Type-ahead navigation
 
-Just start typing and Mariner navigates straight to the matching file. This innovative
-feature is now available on the GNOME desktop!
+Just start typing and Mariner navigates straight to the matching file. Matching
+is fuzzy and typo-tolerant: `dcmnts` finds `Documents`, and a slipped keystroke
+like `Documnets` still lands on it. This innovative feature is now available on
+the GNOME desktop!
 
 ### Dual-pane split view
 
@@ -81,10 +87,23 @@ the top, so what you want is usually the first hit.
   <!-- screenshot placeholder — drop docs/command-palette.png here -->
 </p>
 
+### Command runner
+
+Type `!` in the location bar (**Ctrl+L**) to run a shell command right in the
+folder you're looking at — `git status`, unzip something, a quick `convert`.
+Output streams into a panel at the bottom of the window (**Escape** closes it);
+a command that finishes quietly is just a toast, and the view refreshes by
+itself. Prefer a real terminal? `!!command` runs it in your terminal app and
+keeps the window open afterwards — and a bare `!!` simply opens a terminal
+here. Which terminal that is (also used by **Open in Terminal**) is
+configurable in Preferences.
+
+https://github.com/user-attachments/assets/dacec275-0a2b-4e5b-8ab8-3a60401cb881
+
 ### Full-text search
 
 Search a whole folder tree, with matches appearing as they're found. Turn on
-**Contents** to search *inside* files with [ripgrep](https://github.com/BurntSushi/ripgrep) —
+**Contents** to search _inside_ files with [ripgrep](https://github.com/BurntSushi/ripgrep) —
 fast, with nothing to index first. Narrow results by type (images, documents,
 music, video…) or by date.
 
@@ -100,6 +119,36 @@ a colourful sunburst chart. Click a wedge to drill in. No separate app to instal
   <!-- screenshot placeholder — drop docs/disk-usage.png here -->
 </p>
 
+### Tags
+
+Give files colored tags straight from the right-click menu, then pull up
+everything with that label from the sidebar — wherever the files actually live.
+Tags are stored in the standard `user.xdg.tags` extended attribute, so they
+follow files when you copy them and stay compatible with KDE Dolphin. Not a
+tags person? A single switch in Preferences hides them everywhere — your tag
+data stays intact.
+
+The design follows the GNOME Design team's
+[tags whiteboard](https://gitlab.gnome.org/Teams/Design/whiteboards/-/work_items/332) —
+credit to them for the mockups this feature is based on.
+
+<p align="center">
+  <img src="docs/tags.png" alt="Tags overview page" width="820">
+</p>
+
+### Custom actions
+
+Add your own commands to the right-click menu — open a project in your editor,
+optimize the selected images, run any script on what's selected. Define them in a
+small JSON file and they show up automatically, shown only for the files they
+apply to. See [Configuring custom actions](#configuring-custom-actions) for the
+format.
+
+<p align="center">
+  <img src="docs/custom-actions.png" alt="Custom actions in the context menu" width="820">
+  <!-- screenshot placeholder — drop docs/custom-actions.png here -->
+</p>
+
 ---
 
 ## Everything that's different from GNOME Files
@@ -107,20 +156,34 @@ a colourful sunburst chart. Click a wedge to drill in. No separate app to instal
 Beyond the headliners above, a low-density rundown of what Mariner does that
 Nautilus doesn't (or does differently):
 
-- **Type-ahead find** — type to jump straight to a file, like Nautilus used to.
+- **Type-ahead find** — type to jump straight to a file, like Nautilus used
+  to — but fuzzy and typo-tolerant.
 - **Split view** — two panes in one tab, with cross-pane copy/move and drag.
 - **Quick Look** — Space-to-preview for images, audio/video, text and code.
 - **Command palette** — Ctrl+P to run any action or jump to a folder.
 - **Frecency folder jumping** — recent folders ranked by frequency × recency.
+- **Command runner** — `!command` in the location bar runs it in the current
+  folder with output in a bottom panel; `!!command` runs it in your terminal.
 - **Full-text search** — grep inside files via ripgrep, no indexing daemon.
 - **Disk usage analyzer** — interactive sunburst chart, built in.
+- **Folder sizes in the list view** — opt-in "calculate all sizes": the Size
+  column shows real folder totals, cached so revisits are instant.
+- **Configurable terminal** — Open in Terminal and `!!` spawn the emulator of
+  your choice via a command template in Preferences.
+- **Tags** — color-coded labels on files, browsable from the sidebar; stored as
+  `user.xdg.tags` xattrs, interoperable with KDE Dolphin.
+- **Clutter-free by choice** — hide any sidebar section (Recent, Trash, Tags,
+  Devices…) from Preferences, or switch tags off entirely, so the window shows
+  only what you actually use.
+- **Custom actions** — add your own scripts to the context menu, matched to the
+  selection by type, extension, or count.
 - **Computer view** — every drive and partition with a live capacity bar.
 - **Vim cursor keys** — `Alt+H`/`J`/`K`/`L` move the selection like arrows.
 - **Operations queue** — each running copy/move/archive shown separately, with its
   own progress and cancel button.
 - **Batch rename** — find-and-replace or numbered patterns, with live preview.
-- **Extract & compress** — extract zip, tar.*, 7z and rar; compress to zip,
-  tar.*, or 7z, straight from the right-click menu.
+- **Extract & compress** — extract zip, tar._, 7z and rar; compress to zip,
+  tar._, or 7z, straight from the right-click menu.
 - **Reset zoom** — `Ctrl+0` snaps grid icons back to the default size.
 - **Set as wallpaper**, **Open in Terminal**, **Create Link**, **Restore from
   Trash** — one click from the context menu.
@@ -178,11 +241,39 @@ makepkg -si
 ```
 
 Mariner then appears in your application menu. To make it your default file
-manager:
+manager — both for opening folders _and_ for "Show in folder" from browsers,
+download notifications and `gio open` (the `org.freedesktop.FileManager1`
+interface):
 
 ```sh
 xdg-mime default org.tunaos.mariner.desktop inode/directory
+mariner-set-default            # undo with: mariner-set-default --undo
 ```
+
+This sets the `inode/directory` MIME default and installs a per-user
+`org.freedesktop.FileManager1` service (no root, no conflict with an installed
+Nautilus). See [docs/default-file-manager.md](docs/default-file-manager.md) for
+what it does and how to set it up by hand.
+
+### npm / pnpm (global)
+
+Requires **Node ≥ 22.18** and the GTK runtime libraries (**GTK ≥ 4.16**,
+**libadwaita ≥ 1.5**, gobject-introspection). Prebuilt node-gtk binaries cover
+x64 Linux on Node 22 / 24 / 26; other setups build node-gtk from source and
+also need a C toolchain and the GTK / GObject-Introspection headers.
+
+```sh
+npm install -g github:romgrk/mariner    # or: pnpm add -g github:romgrk/mariner
+
+mariner ~/Documents                     # run it
+mariner --install-desktop-entry         # application menu entry + icon
+```
+
+`--install-desktop-entry` writes the desktop entry and icons under
+`~/.local/share`, with `Exec=` pointing at this install's absolute paths (npm
+global bin dirs are rarely on the desktop session's `PATH`). Run
+`mariner --uninstall-desktop-entry` to remove them again — ideally before
+uninstalling the package itself.
 
 ### From source
 
@@ -209,16 +300,66 @@ npm start -- ~/Documents     # from source
 Press **Ctrl+?** at any time for the full keyboard-shortcuts window. A few worth
 knowing up front:
 
-| Shortcut | Action |
-| --- | --- |
-| **Ctrl+P** | Command palette |
-| **Ctrl+F** | Search (add **Contents** filter for full-text) |
-| **Space** | Quick Look preview |
-| **F3** | Toggle split view |
-| **F6** / **Alt+W** | Focus the other pane |
-| **Ctrl+L** | Type a path |
-| **Ctrl+1** / **Ctrl+2** | List / grid view |
-| **F2** | Rename (batch rename with a multi-selection) |
+| Shortcut                | Action                                         |
+| ----------------------- | ---------------------------------------------- |
+| **Ctrl+P**              | Command palette                                |
+| **Ctrl+F**              | Search (add **Contents** filter for full-text) |
+| **Space**               | Quick Look preview                             |
+| **F3**                  | Toggle split view                              |
+| **F6** / **Alt+W**      | Focus the other pane                           |
+| **Ctrl+L**              | Type a path — or a `!` shell command           |
+| **Ctrl+1** / **Ctrl+2** | List / grid view                               |
+| **F2**                  | Rename (batch rename with a multi-selection)   |
+
+### Configuring custom actions
+
+You can add your own commands to the file-view context menu. Create
+`~/.config/mariner/actions.json` (honouring `$XDG_CONFIG_HOME`) with a list of
+actions:
+
+```json
+{
+  "actions": [
+    { "label": "Open in VS Code", "command": "code %F" },
+    {
+      "label": "Optimize PNGs",
+      "command": "optipng %F",
+      "mimeTypes": ["image/png"],
+      "selection": "any"
+    },
+    {
+      "label": "New note here",
+      "command": "gnome-text-editor \"$(mktemp %d/note-XXXX.md)\"",
+      "selection": "none"
+    }
+  ]
+}
+```
+
+Each action needs a `label` and a `command`; the rest are optional and control
+when the action appears:
+
+| Field         | Meaning                                                           | Default |
+| ------------- | ----------------------------------------------------------------- | ------- |
+| `selection`   | `none` (empty area), `single`, `multiple`, or `any` selected item | `any`   |
+| `mimeTypes`   | only when every selected item matches one of these globs          | any     |
+| `extensions`  | only when every selected item has one of these extensions         | any     |
+| `directories` | set to `false` to hide when a folder is selected                  | `true`  |
+| `files`       | set to `false` to hide when a regular file is selected            | `true`  |
+
+The `command` runs through `/bin/sh` from the current folder, with these tokens
+substituted (each safely shell-quoted):
+
+| Token | Expands to          | Token | Expands to         |
+| ----- | ------------------- | ----- | ------------------ |
+| `%f`  | first selected path | `%F`  | all selected paths |
+| `%u`  | first selected URI  | `%U`  | all selected URIs  |
+| `%n`  | first selected name | `%N`  | all selected names |
+| `%d`  | current folder path | `%%`  | a literal `%`      |
+
+With nothing selected, `%f`/`%F`/`%u`/`%U` fall back to the current folder. The
+file is re-read every time you open the context menu, so edits take effect
+without restarting Mariner.
 
 ## Contributing
 

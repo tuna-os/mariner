@@ -1,10 +1,47 @@
 import Gtk from 'gi:Gtk-4.0'
 import Pango from 'gi:Pango-1.0'
-import { F } from '../core/gio.ts'
 import { thumbnails } from '../services/thumbnail-service.ts'
+import { tagsService } from '../services/tags-service.ts'
+import { dirSizes } from '../services/dir-size-service.ts'
 import { displayName } from '../core/format.ts'
 import type { ColumnDef } from '../core/columns.ts'
 import type { GFileInfo } from '../core/types.ts'
+
+/* Maximum colored dots drawn on a cell; further tags collapse into "+n". */
+const MAX_DOTS = 3
+
+/* Repopulate a cell's tag-dots box: one colored dot per (colored) tag, a "+n"
+ * overflow, and the full tag list as the tooltip. Text tags (no color) only
+ * count toward the overflow — a grey dot for them would read as noise. */
+function applyTagDots(dots: any, info: GFileInfo): void {
+  let c
+  while ((c = dots.getFirstChild()) !== null) dots.remove(c)
+  const file = info._file
+  const tags = file ? tagsService.tagObjectsOf(file.getUri()) : []
+  if (!tags.length) { dots.setVisible(false); return }
+  const colored = tags.filter(t => t.color).slice(0, MAX_DOTS)
+  for (const t of colored) {
+    const dot = new Gtk.Box({ valign: Gtk.Align.CENTER })
+    dot.addCssClass('mariner-tag-dot')
+    dot.addCssClass('tag-color-' + t.color)
+    dots.append(dot)
+  }
+  const extra = tags.length - colored.length
+  if (extra > 0) {
+    const more = new Gtk.Label({ label: colored.length ? `+${extra}` : `${extra} tag${extra > 1 ? 's' : ''}` })
+    more.addCssClass('mariner-tag-more')
+    more.addCssClass('dim-label')
+    dots.append(more)
+  }
+  dots.setTooltipText(tags.map(t => t.name).join(', '))
+  dots.setVisible(true)
+}
+
+function makeDotsBox(halign: any): any {
+  const dots = new Gtk.Box({ orientation: Gtk.Orientation.HORIZONTAL, spacing: 4, halign, valign: Gtk.Align.CENTER, visible: false })
+  dots.addCssClass('mariner-tag-dots')
+  return dots
+}
 
 /* Cell factories for the grid and list views. `ctx` provides the live icon size
  * and a hook to wire a right-click menu onto each cell. Factory/bind callbacks
@@ -32,9 +69,9 @@ function applyCut(box: any, info: GFileInfo, ctx: CellContext): void {
  * the image with the key it is currently displaying. */
 function applyThumbnail(image: any, info: GFileInfo): void {
   const file = info._file
-  const path = file && F.getPath(file)
+  const path = file && file.getPath()
   if (!path) { image._thumbKey = null; return }
-  const uri = F.getUri(file)
+  const uri = file.getUri()
   const key = uri + '|' + info.getAttributeUint64('time::modified')
   image._thumbKey = key
   thumbnails.request({ key, path, uri, contentType: info.getContentType() || '', bytes: Number(info.getSize()) }, tex => {
@@ -60,6 +97,7 @@ export function gridFactory(ctx: CellContext): any {
       wrapMode: Pango.WrapMode.WORD_CHAR, lines: 2,
       justify: Gtk.Justification.CENTER, maxWidthChars: 14,
     }))
+    box.append(makeDotsBox(Gtk.Align.CENTER))
     item.setChild(box)
     ctx.attachMenu(box, item)
   })
@@ -67,11 +105,13 @@ export function gridFactory(ctx: CellContext): any {
     const info = item.getItem()
     const box = item.getChild()
     const image = box.getFirstChild()
+    const label = image.getNextSibling()
     image.setPixelSize(ctx.iconSize())
     const icon = info.getIcon()
     if (icon) image.setFromGicon(icon)
     else image.setFromIconName('text-x-generic')
-    box.getLastChild().setLabel(displayName(info))
+    label.setLabel(displayName(info))
+    applyTagDots(label.getNextSibling(), info)
     toggleHidden(box, info)
     applyCut(box, info, ctx)
     applyThumbnail(image, info)
@@ -88,6 +128,7 @@ export function nameCellFactory(ctx: CellContext): any {
     image.addCssClass('mariner-image')
     box.append(image)
     box.append(new Gtk.Label({ ellipsize: Pango.EllipsizeMode.END, xalign: 0 }))
+    box.append(makeDotsBox(Gtk.Align.START))
     item.setChild(box)
     ctx.attachMenu(box, item)
   })
@@ -95,9 +136,11 @@ export function nameCellFactory(ctx: CellContext): any {
     const info = item.getItem()
     const box = item.getChild()
     const image = box.getFirstChild()
+    const label = image.getNextSibling()
     const icon = info.getIcon()
     if (icon) image.setFromGicon(icon)
-    box.getLastChild().setLabel(displayName(info))
+    label.setLabel(displayName(info))
+    applyTagDots(label.getNextSibling(), info)
     toggleHidden(box, info)
     applyCut(box, info, ctx)
     applyThumbnail(image, info)
@@ -111,19 +154,58 @@ export function nameColumn(ctx: CellContext): any {
   return col
 }
 
+/* Live Size-column labels, keyed to their bound item so folder-size results
+ * can be painted *in place* as scans land. Repainting through refreshCells
+ * would re-set the factories — the ColumnView materializes every row, so that
+ * rebuilds the entire listing's widgets per wave of results and visibly janks
+ * the UI. Rewriting just the label text touches only the cells whose value
+ * changed. */
+const sizeLabels = new Set<any>()
+let sizeHooked = false
+function hookDirSizes(def: ColumnDef): void {
+  if (sizeHooked) return
+  sizeHooked = true
+  dirSizes.on('changed', () => {
+    for (const label of sizeLabels) {
+      const info = label._sizeInfo
+      if (!info) continue
+      try {
+        const text = def.format(info)
+        if (label.getLabel() !== text) label.setLabel(text)
+      } catch { sizeLabels.delete(label) }   /* disposed widget */
+    }
+  })
+}
+
 /* A resizable text column driven by a registry ColumnDef (its label + pure
  * formatter). The FileView keeps its own ordered list of these to rebuild the
- * visible column set. */
-export function metaColumn(def: ColumnDef): any {
+ * visible column set. The factory is exported separately so refreshCells can
+ * rebind meta cells whose data lives outside the model (e.g. the Tags column). */
+export function metaFactory(def: ColumnDef): any {
   const factory = new Gtk.SignalListItemFactory()
+  const isSize = def.id === 'size'
   factory.on('setup', (item: any) => {
     const label = new Gtk.Label({ xalign: def.rightAlign ? 1 : 0, ellipsize: Pango.EllipsizeMode.END })
     label.addCssClass('dim-label')
     label.addCssClass('mariner-meta-cell')
+    if (isSize) { sizeLabels.add(label); hookDirSizes(def) }
     item.setChild(label)
   })
-  factory.on('bind', (item: any) => item.getChild().setLabel(def.format(item.getItem())))
-  const col = new Gtk.ColumnViewColumn({ title: def.label, factory })
+  factory.on('bind', (item: any) => {
+    const label = item.getChild()
+    label.setLabel(def.format(item.getItem()))
+    if (isSize) label._sizeInfo = item.getItem()
+  })
+  if (isSize) {
+    factory.on('unbind', (item: any) => { item.getChild()._sizeInfo = null })
+    factory.on('teardown', (item: any) => sizeLabels.delete(item.getChild()))
+  }
+  return factory
+}
+
+export function metaColumn(def: ColumnDef): any {
+  const col = new Gtk.ColumnViewColumn({ title: def.label, factory: metaFactory(def) })
   col.setResizable(true)
+  col._def = def   /* JS prop survives on the wrapper; used by refreshCells */
   return col
 }

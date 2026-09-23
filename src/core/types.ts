@@ -11,8 +11,11 @@ export interface Entry {
   file: GFile
 }
 
-/* A sidebar location. */
+/* A sidebar location. Fixed places carry the id of their show/hide toggle
+ * (see SIDEBAR_ITEMS in places-service.ts); dynamic ones (bookmarks, devices)
+ * have none — their whole section is toggled instead. */
 export interface Place {
+  id?: string
   label: string
   icon: string
   file: GFile
@@ -32,6 +35,8 @@ export interface SearchFilter {
   /* When true (and a query is present), search file *contents* via ripgrep
    * instead of matching names. */
   contents?: boolean
+  /* Tag names a match must carry — ALL of them (tag intersection). */
+  tags?: string[]
 }
 
 /* One list-view column's state: which column (by id, see core/columns.ts) and
@@ -51,6 +56,14 @@ export interface Prefs {
   iconSize: number
   /* Ordered list-view columns (excluding the always-first Name column). */
   columns: ColumnConfig[]
+  /* Ids of sidebar items/sections the user hid (see SIDEBAR_ITEMS). */
+  sidebarHidden: string[]
+  /* Terminal command template ('' = auto-detect; see services/terminal.ts). */
+  terminal: string
+  /* Opt-in recursive folder sizes in the list view's Size column. */
+  dirSizes: boolean
+  /* Minutes before a cached folder size goes stale and is re-scanned. */
+  dirSizesTtl: number
 }
 
 /* What the FileView needs to filter + order a dataset. */
@@ -72,7 +85,7 @@ export interface CopyItem {
 /* File-operation feedback payloads. Long ops carry an `id` so a concurrent
  * operations queue can track and cancel each independently. */
 export interface OpBegin { id: number; title: string }
-export interface OpProgress { id: number; title: string; done: number; total: number }
+export interface OpProgress { id: number; title: string; done: number; total: number; paused?: boolean }
 export interface OpDone { id: number; title: string; count: number; cancelled: boolean }
 export interface OpError { id?: number; title: string; message: string }
 export interface OpNotify { message: string }

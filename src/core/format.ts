@@ -96,7 +96,9 @@ export function formatPermissions(info: GFileInfo): string {
 export function modifiedUnix(info: GFileInfo): number {
   const dt = info.getModificationDateTime?.()
   if (!dt) return 0
-  try { return dt.toUnix() } catch { return 0 }
+  /* toUnix() is a gint64, surfaced as a BigInt by node-gtk — coerce at the
+   * source so size/modified sorts and the search date filter stay numeric. */
+  try { return Number(dt.toUnix()) } catch { return 0 }
 }
 
 /* Path with $HOME abbreviated to `~` (for the command palette's folder list);

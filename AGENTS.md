@@ -18,24 +18,25 @@ Human docs: [`README.md`](README.md) (features, keybindings),
   not accept, buys a merge conflict every time upstream touches it. Prefer
   changes that are upstreamable, or that live in files upstream does not have.
 
-## Nothing runs the tests
+## Unit tests run in CI; typecheck and biome do not
 
 `package.json` declares `test` (`node --test tests/*.test.ts`) and `typecheck`
-(`tsc --noEmit`), and `biome.json` configures a formatter and linter. **No
-workflow runs any of them.** The repo's three workflows are `publish-flatpak`,
-`screenshots`, and `sync-upstream`.
+(`tsc --noEmit`), and `biome.json` configures a formatter and linter.
+`.github/workflows/ci.yml` now runs the unit tests on every push and pull
+request, with V8 coverage uploaded as an artifact. **`typecheck` and biome
+still run in no workflow.**
 
-What *does* gate a PR is `publish-flatpak.yml`, which builds (without
-publishing) on pull requests — and the Flatpak build's `mariner` module runs
-`npm run typecheck` as a build command. So **type errors are caught, but only
-as a Flatpak build failure**, several minutes and a lot of unrelated machinery
-away from the actual mistake. The unit tests and biome are caught nowhere.
+`publish-flatpak.yml` also gates a PR: it builds (without publishing) on pull
+requests, and the Flatpak build's `mariner` module runs `npm run typecheck` as
+a build command. So type errors are still caught only as a Flatpak build
+failure, several minutes and a lot of unrelated machinery away from the
+actual mistake — `ci.yml` did not change that half. biome is caught nowhere.
 
 The tests are cheap to run and need **no `node_modules` at all** — they import
 `src/core/*.ts` directly and rely on Node's built-in type stripping:
 
 ```bash
-node --test tests/*.test.ts   # 13 tests across 4 suites, ~0.3s, zero install
+node --test tests/*.test.ts   # 19 tests across 9 suites, well under a second, zero install
 ```
 
 `npm run typecheck` does need dependencies installed.

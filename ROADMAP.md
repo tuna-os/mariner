@@ -1,6 +1,6 @@
 # Mariner Roadmap
 
-**Last updated**: 2026-08-24 | **Maintainer**: tuna-os (hanthor)
+**Last updated**: 2026-09-25 | **Maintainer**: tuna-os (hanthor)
 
 ---
 
@@ -24,17 +24,21 @@ desktops.
   install path exists (TunaOS remote) but nothing versioned is published to
   it; `publish-flatpak.yml` fires on `v*` tag push that has never happened.
 - **Upstream sync**: `Sync upstream` workflow failed 13/13 consecutive runs
-  (08-11 → 08-24) — permanent rename/rename conflict
+  (08-11 → 08-24) on the rename/rename conflict
   (`com.github.romgrk` → `org.tunaos` in HEAD vs `io.github.romgrk` upstream).
-  Fork is 75 commits / 5,021 lines behind upstream and cannot converge.
-- **Open issues**: 1 (ci baseline #4). No roadmap tracker, no milestone.
+  #56 (merged 09-23) fixed the conflict handling and merged upstream master
+  in; the workflow has run green on 09-23 and 09-24. Two green runs is not
+  yet a durable fix — watch for the conflict recurring on the next upstream
+  rename-adjacent change before calling this closed.
+- **Open issues**: 4 (sec-check hardening #64, #65, #66; AppStream URL
+  cleanup #60). No roadmap tracker, no milestone.
 
 ### Priorities
 
 | Priority | Item | Tracking | Status |
 |----------|------|----------|--------|
 | P0 | First tagged release — cut a `v*` tag + GitHub Release with binaries/checksums so BETA is installable | (new) | ⬜ Not started |
-| P1 | Resolve upstream-sync conflict — decide fork-identity policy (upstream-following vs. tuna-os identity) | #5 | 🔴 13/13 failing |
+| P1 | Resolve upstream-sync conflict — decide fork-identity policy (upstream-following vs. tuna-os identity) | #56 | 🟡 Fixed 09-23, 2/2 green since |
 | P2 | Roadmap coverage entry in org ROADMAP tally | #1295 | ⬜ Not started |
 
 ---
@@ -48,7 +52,7 @@ desktops.
 | Goal | Owner | Tracking | Status |
 |------|-------|----------|--------|
 | First tagged release + GitHub Release | hanthor | (new) | ⬜ Not started |
-| Sync workflow green (conflict strategy decision) | hanthor | #5 | ⬜ Not started |
+| Sync workflow green (conflict strategy decision) | hanthor | #56 | 🟡 Green 2/2 runs, monitor for recurrence |
 
 ### Next Quarter (2026 Q4)
 

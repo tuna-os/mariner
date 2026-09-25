@@ -3,6 +3,7 @@ import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
 import { resolve } from 'node:path'
 import { AppWindow } from './window.ts'
+import { createServiceRegistry } from './services/registry.ts'
 import { debugLog, installDiagnostics } from './core/debug-log.ts'
 import { fileForPath, fileForUri } from './core/gio.ts'
 import { HOME } from './core/format.ts'
@@ -86,15 +87,16 @@ app.on('command-line', (commandLine: any) => {
       app.setAccelsForAction(action, accels)
   }
 
+  const services = createServiceRegistry()
   const { mode, targets } = parseInvocation(args)
   if (mode === 'open' || targets.length === 0) {
-    new AppWindow(app, startFile(targets[0], cwd))
+    new AppWindow(app, startFile(targets[0], cwd), services)
   } else {
     const uris = targets.map(t => fileForArg(t, cwd).getUri())
     /* Start at the first item's parent; revealItems groups the rest and opens
      * further tabs for items living in other folders. */
     const first = fileForUri(uris[0])
-    const win = new AppWindow(app, first.getParent() ?? first)
+    const win = new AppWindow(app, first.getParent() ?? first, services)
     if (mode === 'properties') win.showItemProperties(uris)
     else win.revealItems(uris)
   }

@@ -22,18 +22,29 @@ on:
         default: false
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
-  publish:
+  validate:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.publish)
     uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@main
+    permissions:
+      contents: read
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json
       repo-name: tuna-os/mariner
-      # Not `A && B || C` -- if B (inputs.publish) is false, that's falsy,
-      # so `||` would silently fall through to C and publish anyway. Confirmed
-      # by testing: a workflow_dispatch with publish=false still published.
-      publish: ${{ (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+      publish: false
+
+  publish:
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.publish)
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@main
+    permissions:
+      contents: write
+      packages: write
+    with:
+      app-id: org.tunaos.mariner
+      manifest-path: org.tunaos.mariner.json
+      repo-name: tuna-os/mariner
+      publish: true
     secrets: inherit

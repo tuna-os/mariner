@@ -6,6 +6,8 @@
  */
 
 import Gtk from 'gi:Gtk-4.0'
+import { displayName } from '../core/format.ts'
+import { globMatcher } from '../core/glob.ts'
 import type { GFileInfo } from '../core/types.ts'
 
 export interface SelectionListener {
@@ -105,15 +107,19 @@ export class SelectionModel {
     }
   }
 
-  /** Select rows by glob pattern on their names */
-  selectByGlob(pattern: string): void {
-    const { default: minimatch } = await import('npm:minimatch@9.0.3')
+  /** Replace the selection with every row whose name matches the shell glob
+   * `pattern` (see core/glob.ts — the same matcher FileView.selectPattern and
+   * Ctrl+S use). Returns the number of rows selected. */
+  selectByGlob(pattern: string): number {
+    const match = globMatcher(pattern)
     this.unselectAll()
+    let count = 0
     for (let i = 0; i < this.rows.length; i++) {
-      if (minimatch(this.rows[i].getDisplayName(), pattern)) {
-        this.selectItem(i, false) // add to selection
-      }
+      if (!match(displayName(this.rows[i]))) continue
+      this.selectItem(i, false) // add to selection
+      count++
     }
+    return count
   }
 
   /** Restore selection from saved keys */

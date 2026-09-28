@@ -136,19 +136,6 @@ credit to them for the mockups this feature is based on.
   <img src="docs/tags.png" alt="Tags overview page" width="820">
 </p>
 
-### Custom actions
-
-Add your own commands to the right-click menu — open a project in your editor,
-optimize the selected images, run any script on what's selected. Define them in a
-small JSON file and they show up automatically, shown only for the files they
-apply to. See [Configuring custom actions](#configuring-custom-actions) for the
-format.
-
-<p align="center">
-  <img src="docs/custom-actions.png" alt="Custom actions in the context menu" width="820">
-  <!-- screenshot placeholder — drop docs/custom-actions.png here -->
-</p>
-
 ---
 
 ## Everything that's different from GNOME Files
@@ -175,8 +162,6 @@ Nautilus doesn't (or does differently):
 - **Clutter-free by choice** — hide any sidebar section (Recent, Trash, Tags,
   Devices…) from Preferences, or switch tags off entirely, so the window shows
   only what you actually use.
-- **Custom actions** — add your own scripts to the context menu, matched to the
-  selection by type, extension, or count.
 - **Computer view** — every drive and partition with a live capacity bar.
 - **Vim cursor keys** — `Alt+H`/`J`/`K`/`L` move the selection like arrows.
 - **Operations queue** — each running copy/move/archive shown separately, with its
@@ -310,56 +295,6 @@ knowing up front:
 | **Ctrl+L**              | Type a path — or a `!` shell command           |
 | **Ctrl+1** / **Ctrl+2** | List / grid view                               |
 | **F2**                  | Rename (batch rename with a multi-selection)   |
-
-### Configuring custom actions
-
-You can add your own commands to the file-view context menu. Create
-`~/.config/mariner/actions.json` (honouring `$XDG_CONFIG_HOME`) with a list of
-actions:
-
-```json
-{
-  "actions": [
-    { "label": "Open in VS Code", "command": "code %F" },
-    {
-      "label": "Optimize PNGs",
-      "command": "optipng %F",
-      "mimeTypes": ["image/png"],
-      "selection": "any"
-    },
-    {
-      "label": "New note here",
-      "command": "gnome-text-editor \"$(mktemp %d/note-XXXX.md)\"",
-      "selection": "none"
-    }
-  ]
-}
-```
-
-Each action needs a `label` and a `command`; the rest are optional and control
-when the action appears:
-
-| Field         | Meaning                                                           | Default |
-| ------------- | ----------------------------------------------------------------- | ------- |
-| `selection`   | `none` (empty area), `single`, `multiple`, or `any` selected item | `any`   |
-| `mimeTypes`   | only when every selected item matches one of these globs          | any     |
-| `extensions`  | only when every selected item has one of these extensions         | any     |
-| `directories` | set to `false` to hide when a folder is selected                  | `true`  |
-| `files`       | set to `false` to hide when a regular file is selected            | `true`  |
-
-The `command` runs through `/bin/sh` from the current folder, with these tokens
-substituted (each safely shell-quoted):
-
-| Token | Expands to          | Token | Expands to         |
-| ----- | ------------------- | ----- | ------------------ |
-| `%f`  | first selected path | `%F`  | all selected paths |
-| `%u`  | first selected URI  | `%U`  | all selected URIs  |
-| `%n`  | first selected name | `%N`  | all selected names |
-| `%d`  | current folder path | `%%`  | a literal `%`      |
-
-With nothing selected, `%f`/`%F`/`%u`/`%U` fall back to the current folder. The
-file is re-read every time you open the context menu, so edits take effect
-without restarting Mariner.
 
 ## Contributing
 

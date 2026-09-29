@@ -23,7 +23,7 @@ jobs:
     # job container does not have.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Install Flatpak
         run: |
@@ -51,7 +51,7 @@ jobs:
           mkdir -p /tmp/demo-home/{Documents,Downloads,Music,Pictures,Videos}
           mkdir -p /tmp/demo-home/Documents/{Invoices,Notes,Reports}
 
-      - uses: tuna-os/flatpak-index/.github/actions/capture-screenshots@main
+      - uses: tuna-os/flatpak-index/.github/actions/capture-screenshots@95c4f769fbd98eb0092eb190439946cd548ce19b
         with:
           # --socket=x11 so the sandbox can see the Xvfb the action started;
           # HOME redirected into the staged directory, which the sandbox also
@@ -66,7 +66,7 @@ jobs:
       # intermittently carry a codec-error toast that only shows up by
       # looking at the image. The committed PNG is updated by a human (or an
       # agent) who has seen this artifact.
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: screenshots
           path: docs/screenshots/

@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   publish:
-    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@main
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@c9f1efaa0b84849b955b7deee47a8401234564c2
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json

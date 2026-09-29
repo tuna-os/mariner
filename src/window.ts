@@ -44,6 +44,7 @@ import { fileClipboardProvider } from './ui/dnd.ts'
 import { CommandPalette } from './ui/command-palette.ts'
 import type { PaletteItem } from './ui/command-palette.ts'
 import type { Prefs, GFile, GFileInfo, Entry, CopyItem, OpError } from './core/types.ts'
+import type { ServiceRegistry } from './services/registry.ts'
 
 export const MIN_ZOOM = 32, MAX_ZOOM = 128, ZOOM_STEP = 16, DEFAULT_ZOOM = 64
 
@@ -60,11 +61,7 @@ export class AppWindow {
   tabs: Tab[] = []
   _activeTab: Tab | null = null
   searching = false
-  clipboard = new ClipboardService()
-  fileOps = new FileOperations()
-  undo = new UndoService()
-  archive = new ArchiveService()
-  opsQueue = new OperationsQueue()
+  services: ServiceRegistry
   _pasteTarget: GFile | null = null
   _ctxFile: GFile | null = null
   _cutUris = new Set<string>()
@@ -72,8 +69,6 @@ export class AppWindow {
   _ctxPopover: any = null
   _pendingTagsChanged = false
   _ctxTag: string | null = null
-  _quicklook: QuickLook | null = null
-  _palette: CommandPalette | null = null
   _actions: Record<string, any> = {}
 
   window!: any
@@ -94,8 +89,9 @@ export class AppWindow {
   hiddenAction!: any
   searchAction!: any
 
-  constructor(app: any, startFile: GFile) {
+  constructor(app: any, startFile: GFile, services: ServiceRegistry) {
     this.app = app
+    this.services = services
     dirSizes.enabled = this.prefs.dirSizes
     dirSizes.ttlMs = this.prefs.dirSizesTtl * 60_000
     this._buildUI()
@@ -110,7 +106,7 @@ export class AppWindow {
 
   /* Open a second window at the same location (the win.new-window action). */
   _newWindow(): AppWindow {
-    return new AppWindow(this.app, this.activeTab?.location ?? fileForPath(HOME))
+    return new AppWindow(this.app, this.activeTab?.location ?? fileForPath(HOME), this.services)
   }
 
   _saveState(): void {
@@ -204,7 +200,7 @@ export class AppWindow {
       onSearchExit: () => { if (this.searching) this._setSearch(false) },
       onSearchActivate: () => this.activeTab?.view.widget.grabFocus(),
     })
-    this.toolbar.packTrailing(this.opsQueue.button)
+    this.toolbar.packTrailing(this.services.opsQueue.button)
     this.tabView = new Adw.TabView()
     this.tabView.on('notify::selected-page', () => this._onTabSwitched())
     this.tabView.on('close-page', (...a: any[]) => this._onClosePage(a[a.length - 1]))
@@ -236,33 +232,33 @@ export class AppWindow {
   /* ---- File-operation feedback ---- */
   _wireFileOps(): void {
     /* Long ops show per-op progress + pause/resume + cancel in the operations queue. */
-    this.opsQueue.bind(this.fileOps, 'f', {
-      cancel: (id: number) => this.fileOps.cancel(id),
-      pause: (id: number) => this.fileOps.pause(id),
-      resume: (id: number) => this.fileOps.resume(id),
+    this.services.opsQueue.bind(this.services.fileOps, 'f', {
+      cancel: (id: number) => this.services.fileOps.cancel(id),
+      pause: (id: number) => this.services.fileOps.pause(id),
+      resume: (id: number) => this.services.fileOps.resume(id),
     })
-    this.opsQueue.bind(this.archive, 'a', {
-      pause: (id: number) => this.archive.pause(id),
-      resume: (id: number) => this.archive.resume(id),
+    this.services.opsQueue.bind(this.services.archive, 'a', {
+      pause: (id: number) => this.services.archive.pause(id),
+      resume: (id: number) => this.services.archive.resume(id),
     })
 
     /* Quick-op success toasts are shown by the window methods that record undo,
      * so they can attach an "Undo" button; the service's 'notify' is unused. */
-    this.fileOps.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
-    this.undo.on('changed', () => {
-      this.undoAction.setEnabled(this.undo.canUndo)
-      this.redoAction.setEnabled(this.undo.canRedo)
+    this.services.fileOps.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
+    this.services.undo.on('changed', () => {
+      this.undoAction.setEnabled(this.services.undo.canUndo)
+      this.redoAction.setEnabled(this.services.undo.canRedo)
     })
 
     /* Track cut files so the view can dim them until pasted. */
-    this.clipboard.on('changed', () => {
-      this._cutUris = new Set(this.clipboard.cut ? this.clipboard.files.map(f => f.getUri()) : [])
+    this.services.clipboard.on('changed', () => {
+      this._cutUris = new Set(this.services.clipboard.cut ? this.services.clipboard.files.map(f => f.getUri()) : [])
       for (const p of this.activeTab?.panes ?? []) p.view.refreshCells()
     })
 
     /* Archive ops also flow through the queue (indeterminate); toast on finish. */
-    this.archive.on('done', ({ title }: { title: string }) => this.toast(`${title} — done`))
-    this.archive.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
+    this.services.archive.on('done', ({ title }: { title: string }) => this.toast(`${title} — done`))
+    this.services.archive.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
 
     /* Tag changes repaint every pane's cell dots and refresh any open tag://
      * listing (the sidebar rebuilds itself — it subscribes in createSidebar).
@@ -333,7 +329,7 @@ export class AppWindow {
     if (files.length) {
       const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
       tagsService.addTag(files, tag.name)
-      this.undo.push({
+      this.services.undo.push({
         undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
         redo: () => tagsService.addTag(files, tag.name),
         undoLabel: 'Undo Tag Change', redoLabel: 'Redo Tag Change',
@@ -370,7 +366,7 @@ export class AppWindow {
     if (!files.length) return
     const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
     tagsService.toggleTag(files, tag)
-    this.undo.push({
+    this.services.undo.push({
       undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
       redo: () => tagsService.toggleTag(files, tag),
       undoLabel: 'Undo Tag Change', redoLabel: 'Redo Tag Change',
@@ -382,7 +378,7 @@ export class AppWindow {
     if (!files.length) return
     const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
     tagsService.removeAllTags(files)
-    this.undo.push({
+    this.services.undo.push({
       undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
       redo: () => tagsService.removeAllTags(files),
       undoLabel: 'Undo Remove Tags', redoLabel: 'Redo Remove Tags',
@@ -425,19 +421,19 @@ export class AppWindow {
     if (!plan || !plan.items.length) return
     if (move) {
       const origParent = files[0].getParent()
-      let dests = this.fileOps.moveItems(plan.items, plan.prune)
+      let dests = this.services.fileOps.moveItems(plan.items, plan.prune)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else if (origParent) this.undo.push({
-        undo: () => { dests = this.fileOps.move(dests, origParent) },
-        redo: () => { dests = this.fileOps.moveItems(plan.items, plan.prune) },
+      else if (origParent) this.services.undo.push({
+        undo: () => { dests = this.services.fileOps.move(dests, origParent) },
+        redo: () => { dests = this.services.fileOps.moveItems(plan.items, plan.prune) },
         undoLabel: 'Undo Move', redoLabel: 'Redo Move',
       })
     } else {
-      let dests = this.fileOps.copyItems(plan.items)
+      let dests = this.services.fileOps.copyItems(plan.items)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else this.undo.push({
-        undo: () => this.fileOps.trash(dests),
-        redo: () => { dests = this.fileOps.copyItems(plan.items) },
+      else this.services.undo.push({
+        undo: () => this.services.fileOps.trash(dests),
+        redo: () => { dests = this.services.fileOps.copyItems(plan.items) },
         undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
       })
     }
@@ -464,7 +460,7 @@ export class AppWindow {
     const sel = this._selected()
     const target = sel[0] ?? null
     const inTrash = this._inTrash()
-    const clipEmpty = this.clipboard.isEmpty
+    const clipEmpty = this.services.clipboard.isEmpty
     const tab = this.activeTab
 
     /* Context actions (primary) — same branching as buildContextMenu. */
@@ -821,7 +817,7 @@ export class AppWindow {
       }
     }
     this._popupMenu(buildContextMenu({
-      target, inTrash, clipboardEmpty: this.clipboard.isEmpty, isSplit: tab.isSplit, bookmark, tags,
+      target, inTrash, clipboardEmpty: this.services.clipboard.isEmpty, isSplit: tab.isSplit, bookmark, tags,
       canShowInFolder: this._canShowInFolder(tab, sel),
     }), widget, x, y, customs)
   }
@@ -923,10 +919,10 @@ export class AppWindow {
     const name = await promptText(this.window, { heading: 'New Folder', value: 'New Folder', okLabel: 'Create', selectBasename: true })
     if (!name) return
     const dir = this.activeTab.location
-    const folder = this.fileOps.newFolder(dir, name)
-    this.undo.push({
-      undo: () => this.fileOps.trash([folder]),
-      redo: () => this.fileOps.newFolder(dir, name),
+    const folder = this.services.fileOps.newFolder(dir, name)
+    this.services.undo.push({
+      undo: () => this.services.fileOps.trash([folder]),
+      redo: () => this.services.fileOps.newFolder(dir, name),
       undoLabel: 'Undo Create Folder', redoLabel: 'Redo Create Folder',
     })
     this.toast(`Created “${name}”`)
@@ -936,11 +932,11 @@ export class AppWindow {
     const files = this._selectedFiles()
     if (!files.length || !this.activeTab) return
     const dest = this.activeTab.location
-    if (!this.fileOps.link(files, dest)) return
+    if (!this.services.fileOps.link(files, dest)) return
     const links = files.map(f => dest.getChild(f.getBasename()))
-    this.undo.push({
-      undo: () => this.fileOps.trash(links),
-      redo: () => this.fileOps.link(files, dest),
+    this.services.undo.push({
+      undo: () => this.services.fileOps.trash(links),
+      redo: () => this.services.fileOps.link(files, dest),
       undoLabel: 'Undo Create Link', redoLabel: 'Redo Create Link',
     })
     this.toast(files.length > 1 ? 'Links created' : 'Link created')
@@ -1012,7 +1008,7 @@ export class AppWindow {
   _clip(cut: boolean): void {
     const files = this._selectedFiles()
     if (!files.length) return
-    this.clipboard.set(files, cut)
+    this.services.clipboard.set(files, cut)
     try { this.window.getClipboard().setContent(fileClipboardProvider(files, cut)) } catch { /* system clipboard best-effort */ }
     this.toast(`${files.length} item${files.length > 1 ? 's' : ''} ${cut ? 'cut' : 'copied'}`)
   }
@@ -1027,7 +1023,7 @@ export class AppWindow {
         try { text = cb.readTextFinish(a[1]) } catch { return }
         if (Array.isArray(text)) text = text[0]
         const files = String(text || '').split(/\r?\n/).filter(u => u.startsWith('file://')).map(u => fileForUri(u))
-        if (files.length) this.fileOps.copy(files, dest)
+        if (files.length) this.services.fileOps.copy(files, dest)
       })
     } catch { /* no system clipboard */ }
   }
@@ -1044,19 +1040,19 @@ export class AppWindow {
     if (!plan || !plan.items.length) return
     if (targetDir) {
       const origParent = incoming[0].getParent()
-      let dests = this.fileOps.moveItems(plan.items, plan.prune)
+      let dests = this.services.fileOps.moveItems(plan.items, plan.prune)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else if (origParent) this.undo.push({
-        undo: () => { dests = this.fileOps.move(dests, origParent) },
-        redo: () => { dests = this.fileOps.moveItems(plan.items, plan.prune) },
+      else if (origParent) this.services.undo.push({
+        undo: () => { dests = this.services.fileOps.move(dests, origParent) },
+        redo: () => { dests = this.services.fileOps.moveItems(plan.items, plan.prune) },
         undoLabel: 'Undo Move', redoLabel: 'Redo Move',
       })
     } else {
-      let dests = this.fileOps.copyItems(plan.items)
+      let dests = this.services.fileOps.copyItems(plan.items)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else this.undo.push({
-        undo: () => this.fileOps.trash(dests),
-        redo: () => { dests = this.fileOps.copyItems(plan.items) },
+      else this.services.undo.push({
+        undo: () => this.services.fileOps.trash(dests),
+        redo: () => { dests = this.services.fileOps.copyItems(plan.items) },
         undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
       })
     }
@@ -1073,27 +1069,27 @@ export class AppWindow {
   async _paste(): Promise<void> {
     const dest = this._pasteTarget || this.activeTab?.location
     if (!dest) return
-    if (this.clipboard.isEmpty) { this._pasteFromSystem(dest); return }
-    const files = this.clipboard.files.slice()
-    const cut = this.clipboard.cut
+    if (this.services.clipboard.isEmpty) { this._pasteFromSystem(dest); return }
+    const files = this.services.clipboard.files.slice()
+    const cut = this.services.clipboard.cut
     const plan = await this._resolvePlan(files, dest, cut)
     if (!plan || !plan.items.length) return
     if (cut) {
       const origParent = files[0].getParent()
-      let dests = this.fileOps.moveItems(plan.items, plan.prune)
-      this.clipboard.clear()
+      let dests = this.services.fileOps.moveItems(plan.items, plan.prune)
+      this.services.clipboard.clear()
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else if (origParent) this.undo.push({
-        undo: () => { dests = this.fileOps.move(dests, origParent) },
-        redo: () => { dests = this.fileOps.move(dests, dest) },
+      else if (origParent) this.services.undo.push({
+        undo: () => { dests = this.services.fileOps.move(dests, origParent) },
+        redo: () => { dests = this.services.fileOps.move(dests, dest) },
         undoLabel: 'Undo Move', redoLabel: 'Redo Move',
       })
     } else {
-      let dests = this.fileOps.copyItems(plan.items)
+      let dests = this.services.fileOps.copyItems(plan.items)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else this.undo.push({
-        undo: () => this.fileOps.trash(dests),
-        redo: () => { dests = this.fileOps.copyItems(plan.items) },
+      else this.services.undo.push({
+        undo: () => this.services.fileOps.trash(dests),
+        redo: () => { dests = this.services.fileOps.copyItems(plan.items) },
         undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
       })
     }
@@ -1110,12 +1106,12 @@ export class AppWindow {
     const plan = await batchRenameDialog(this.window, sel)
     if (!plan || !plan.length) return
     const items = plan
-      .map(p => ({ from: p.from, to: p.to, cur: this.fileOps.rename(p.file, p.to) }))
+      .map(p => ({ from: p.from, to: p.to, cur: this.services.fileOps.rename(p.file, p.to) }))
       .filter(x => x.cur)
     if (!items.length) return
-    this.undo.push({
-      undo: () => items.forEach(x => { const b = this.fileOps.rename(x.cur, x.from); if (b) x.cur = b }),
-      redo: () => items.forEach(x => { const f = this.fileOps.rename(x.cur, x.to); if (f) x.cur = f }),
+    this.services.undo.push({
+      undo: () => items.forEach(x => { const b = this.services.fileOps.rename(x.cur, x.from); if (b) x.cur = b }),
+      redo: () => items.forEach(x => { const f = this.services.fileOps.rename(x.cur, x.to); if (f) x.cur = f }),
       undoLabel: 'Undo Rename', redoLabel: 'Redo Rename',
     })
     this.toast(`Renamed ${items.length} file${items.length > 1 ? 's' : ''}`)
@@ -1127,11 +1123,11 @@ export class AppWindow {
     const oldName = displayName(sel[0].info)
     const newName = await promptText(this.window, { heading: 'Rename', value: oldName, okLabel: 'Rename', selectBasename: true })
     if (!newName || newName === oldName) return
-    let cur = this.fileOps.rename(sel[0].file, newName)
+    let cur = this.services.fileOps.rename(sel[0].file, newName)
     if (!cur) return
-    this.undo.push({
-      undo: () => { const back = this.fileOps.rename(cur, oldName); if (back) cur = back },
-      redo: () => { const fwd = this.fileOps.rename(cur, newName); if (fwd) cur = fwd },
+    this.services.undo.push({
+      undo: () => { const back = this.services.fileOps.rename(cur, oldName); if (back) cur = back },
+      redo: () => { const fwd = this.services.fileOps.rename(cur, newName); if (fwd) cur = fwd },
       undoLabel: 'Undo Rename', redoLabel: 'Redo Rename',
     })
     this.toast(`Renamed to “${newName}”`)
@@ -1139,10 +1135,10 @@ export class AppWindow {
 
   _trash(): void {
     const files = this._selectedFiles()
-    if (!files.length || !this.fileOps.trash(files)) return
-    this.undo.push({
-      undo: () => this.fileOps.restoreFromTrash(files),
-      redo: () => this.fileOps.trash(files),
+    if (!files.length || !this.services.fileOps.trash(files)) return
+    this.services.undo.push({
+      undo: () => this.services.fileOps.restoreFromTrash(files),
+      redo: () => this.services.fileOps.trash(files),
       undoLabel: 'Undo Move to Trash', redoLabel: 'Redo Move to Trash',
     })
     const n = files.length
@@ -1156,7 +1152,7 @@ export class AppWindow {
       heading: `Permanently delete ${files.length} item${files.length > 1 ? 's' : ''}?`,
       body: 'This action cannot be undone.', okLabel: 'Delete',
     })
-    if (ok) this.fileOps.deletePermanently(files)
+    if (ok) this.services.fileOps.deletePermanently(files)
   }
 
   _properties(): void {
@@ -1176,7 +1172,7 @@ export class AppWindow {
     if (!this.activeTab) return
     const dest = this.activeTab.location
     for (const s of this._selected())
-      if (isArchive(displayName(s.info))) this.archive.extract(s.file, dest)
+      if (isArchive(displayName(s.info))) this.services.archive.extract(s.file, dest)
   }
 
   async _compress(): Promise<void> {
@@ -1185,14 +1181,14 @@ export class AppWindow {
     const base = files.length === 1 ? files[0].getBasename() : 'Archive'
     const res = await compressDialog(this.window, base)
     if (!res) return
-    this.archive.compress(files, this.activeTab.location.getChild(res.name), res.format)
+    this.services.archive.compress(files, this.activeTab.location.getChild(res.name), res.format)
   }
 
   _restore(): void {
     const pairs = this._selected()
       .map(s => [s.file, s.info.getAttributeByteString('trash::orig-path')] as [GFile, string])
       .filter(p => !!p[1])
-    if (pairs.length) this.fileOps.restore(pairs)
+    if (pairs.length) this.services.fileOps.restore(pairs)
   }
 
   /* Restore the selected Trash items into a folder the user picks, rather than
@@ -1204,7 +1200,7 @@ export class AppWindow {
     const dir = await chooseFolder(this.window, { title: 'Restore to Folder' })
     if (!dir) return
     const items = sel.map(s => ({ file: s.file, name: displayName(s.info) }))
-    if (this.fileOps.restoreTo(items, dir))
+    if (this.services.fileOps.restoreTo(items, dir))
       this.toast(`Restored ${items.length} item${items.length > 1 ? 's' : ''} to “${locationName(dir)}”`)
   }
 
@@ -1212,7 +1208,7 @@ export class AppWindow {
     const ok = await confirm(this.window, {
       heading: 'Empty all items from Trash?', body: 'All items will be permanently deleted.', okLabel: 'Empty Trash',
     })
-    if (ok) this.fileOps.emptyTrash()
+    if (ok) this.services.fileOps.emptyTrash()
   }
 
   /* ---- Search / location ---- */

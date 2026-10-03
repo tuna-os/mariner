@@ -1,6 +1,6 @@
 # Mariner Roadmap
 
-**Last updated**: 2026-08-24 | **Maintainer**: tuna-os (hanthor)
+**Last updated**: 2026-10-03 | **Maintainer**: tuna-os (hanthor)
 
 ---
 
@@ -17,47 +17,57 @@ desktops.
 
 ## Current Status
 
-- **Maturity**: BETA per repo description; `PLAN.md` reports nautilus parity
-  reached plus net-new features (dual pane, Quick Look, command palette,
-  ripgrep content search, disk-usage sunburst, batch rename).
-- **Distribution**: **zero** — no GitHub Releases page, no tags. Flatpak
-  install path exists (TunaOS remote) but nothing versioned is published to
-  it; `publish-flatpak.yml` fires on `v*` tag push that has never happened.
-- **Upstream sync**: `Sync upstream` workflow failed 13/13 consecutive runs
-  (08-11 → 08-24) — permanent rename/rename conflict
-  (`com.github.romgrk` → `org.tunaos` in HEAD vs `io.github.romgrk` upstream).
-  Fork is 75 commits / 5,021 lines behind upstream and cannot converge.
-- **Open issues**: 1 (ci baseline #4). No roadmap tracker, no milestone.
+**Checkpoint**: September 2026 → Q4 transition. Core BETA feature set mature; 68 commits landed post-Aug-24 (refactoring, security hardening, app-id migration).
+
+- **Maturity**: BETA; `PLAN.md` documents nautilus parity + net-new features
+  (dual pane, Quick Look, command palette, ripgrep content search, disk-usage
+  sunburst, batch rename, archive browsing, FileManager1, undo/redo).
+- **Feature velocity**: Moderate. Recent work focused on architectural refactor
+  (ServiceRegistry DI pattern, SelectionModel extraction) and security (GitHub
+  Actions pinning, credential scoping, CVE mitigations via npm overrides).
+- **Distribution**: **Still zero** — no tagged release, no GitHub Release, no
+  Flatpak publication. Remains the critical blocker for BETA adoption.
+  `publish-flatpak.yml` is ready to fire on first `v*` tag.
+- **Upstream sync**: Status improved post-Aug-24. Conflict resolution (#56) landed;
+  sync workflow now passes. Fork remains 68–75 commits behind but is
+  converging (identity mismatch resolved via app-id migration to `org.tunaos`).
+- **CI/Test coverage**: ACMM L0 prerequisite files in place. Unit tests live in
+  ci.yml; headless GSK renders validated per `PLAN.md` §5.
+- **Open blockers**: PR #74 (ServiceRegistry refactor) has OCI build failures
+  (xvfb-run exit 1); PR #69 (credential scoping) flagged `needs-direction`.
+  Both on hold awaiting review.
 
 ### Priorities
 
 | Priority | Item | Tracking | Status |
 |----------|------|----------|--------|
-| P0 | First tagged release — cut a `v*` tag + GitHub Release with binaries/checksums so BETA is installable | (new) | ⬜ Not started |
-| P1 | Resolve upstream-sync conflict — decide fork-identity policy (upstream-following vs. tuna-os identity) | #5 | 🔴 13/13 failing |
-| P2 | Roadmap coverage entry in org ROADMAP tally | #1295 | ⬜ Not started |
+| P0 | **First tagged release v0.1.0** — cut tag, run publish-flatpak, verify binary artifacts | (new) | 🔴 BLOCKER |
+| P1 | Unblock PR #74 (OCI build failures) and #69 (needs-direction review) | #72, #69 | 🟡 Hold |
+| P2 | Sustain sync workflow green; curate cherry-picks from upstream if upstream diverges | (ongoing) | 🟢 On track |
 
 ---
 
 ## Quarterly Goals
 
-### Current Quarter (2026 Q3)
+### Current Quarter (2026 Q3 close)
 
-**Theme**: make BETA installable
+**Theme**: unblock BETA distribution
 
 | Goal | Owner | Tracking | Status |
 |------|-------|----------|--------|
-| First tagged release + GitHub Release | hanthor | (new) | ⬜ Not started |
-| Sync workflow green (conflict strategy decision) | hanthor | #5 | ⬜ Not started |
+| First tagged release + GitHub Release binaries | hanthor | (new) | 🔴 Not started — **deadline Oct 10** |
+| Merge PR #74 (ServiceRegistry DI) | architect | #74 | 🟡 On hold — OCI build failure |
+| Merge PR #69 (credential scoping) | scanner | #69 | 🟡 On hold — needs-direction |
 
 ### Next Quarter (2026 Q4)
 
-**Theme**: cadence and adoption
+**Theme**: cadence and adoption surface
 
 | Goal | Owner | Tracking | Status |
 |------|-------|----------|--------|
-| Release cadence aligned with org (weekly/monthly tags) | tuna-os | (new) | ⬜ Not started |
-| Surface in ADOPTION-METRICS snapshot | tuna-os | #1174 | ⬜ Not started |
+| Release cadence (v0.2.0 within 30d of v0.1.0) | tuna-os | (new) | ⬜ Planned |
+| Surface Mariner in ADOPTION-METRICS (org dashboard) | tuna-os | #1295 | ⬜ Planned |
+| Flatpak adoption tracking and feedback loop | tuna-os | (new) | ⬜ Planned |
 
 ---
 

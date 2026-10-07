@@ -17,7 +17,7 @@ The release pipeline for **Mariner** packages the Node.js / `node-gtk` applicati
 
 1. **Pre-release Verification**:
    - Run `npm test` and `npm run typecheck` locally.
-   - Verify all GitHub Actions checks pass on `main` branch.
+   - Verify all GitHub Actions checks pass on `master` branch (the default development branch for this repository).
 2. **Tagging Release**:
    ```bash
    git tag -a v0.2.0 -m "Release Mariner v0.2.0"

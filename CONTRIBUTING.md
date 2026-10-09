@@ -12,6 +12,7 @@ npm install          # installs node-gtk + typescript/@types/node
 npm start            # node --import node-gtk/register src/main.ts
 npm test             # runs the Node test suite in tests/
 npm run typecheck    # tsc --noEmit
+npm run lint         # biome check (linting and formatting)
 ```
 
 TypeScript runs with **no build step** via Node's native type stripping (Node ≥
@@ -22,11 +23,12 @@ typelibs (`Gtk-4.0`, `Adw-1`).
 > checkout for developing the two together; a plain `npm install` pulls
 > `node-gtk` from the npm registry instead.
 
-Before submitting a change, run both validation commands:
+Before submitting a change, run all three validation commands:
 
 ```sh
 npm test
 npm run typecheck
+npm run lint
 ```
 
 `npm test` runs the service and core-logic tests under `tests/` using Node's

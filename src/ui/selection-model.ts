@@ -1,135 +1,168 @@
-/**
- * SelectionModel — encapsulates multi-selection state and operations
- * 
- * Wraps Gtk.MultiSelection to provide a cohesive selection API,
- * separating selection logic from FileView rendering concerns.
- */
-
 import Gtk from 'gi:Gtk-4.0'
-import { displayName } from '../core/format.ts'
-import { globMatcher } from '../core/glob.ts'
-import type { GFileInfo } from '../core/types.ts'
-
-export interface SelectionListener {
-  onSelectionChanged(): void
-}
+import GObject from 'gi:GObject-2.0'
+import type { GFileInfo, Entry } from '../core/types.ts'
 
 /**
- * Selection state and operations for file lists
+ * SelectionModel encapsulates GTK MultiSelection state management and selection
+ * feedback logic, extracted from FileView to enable independent testing and reuse.
+ *
+ * Responsibilities:
+ * - Maintain GtkMultiSelection and underlying data model (GListStore)
+ * - Track selection state and history
+ * - Calculate selection statistics (count, total size)
+ * - Provide selection change notifications
+ *
+ * Does NOT handle:
+ * - Rendering (that stays in FileView)
+ * - Keyboard input (FileView/separate controller)
+ * - Drag-and-drop (separate controller)
  */
 export class SelectionModel {
-  private model: any // Gtk.MultiSelection
-  private store: any // Gio.ListStore
-  private rows: GFileInfo[] = []
-  private listeners: SelectionListener[] = []
+  store: any
+  selection: any
+  _rows: GFileInfo[] = []
+  _statusDirty = false
+  _statusTimer = 0
+  _lastStatus = { count: 0, size: 0n }
 
-  constructor(store: any) {
-    this.store = store
-    this.model = Gtk.MultiSelection.new(store)
-    this.model.on('selection-changed', () => this._notifyListeners())
+  onSelectionChanged?: () => void
+
+  constructor() {
+    const FILE_INFO_TYPE = GObject.type_from_name('GFileInfo')
+    this.store = Gtk.ListStore.new(FILE_INFO_TYPE)
+    this.selection = Gtk.MultiSelection.new(this.store)
+
+    // Coalesce selection-changed signals onto the idle loop (one pass per frame)
+    this.selection.on('selection-changed', () => this._scheduleStatus())
+    this.store.on('items-changed', () => this._scheduleStatus())
   }
 
-  /** Get the underlying GTK MultiSelection model (for view binding) */
-  getModel(): any {
-    return this.model
+  get rows(): GFileInfo[] {
+    return this._rows
   }
 
-  /** Set the rows array for index-based operations */
-  setRows(rows: GFileInfo[]): void {
-    this.rows = rows
-  }
-
-  /** Subscribe to selection changes */
-  addListener(listener: SelectionListener): void {
-    this.listeners.push(listener)
-  }
-
-  removeListener(listener: SelectionListener): void {
-    const idx = this.listeners.indexOf(listener)
-    if (idx >= 0) this.listeners.splice(idx, 1)
-  }
-
-  private _notifyListeners(): void {
-    for (const listener of this.listeners) listener.onSelectionChanged()
-  }
-
-  // Selection queries
-  isSelected(index: number): boolean {
-    return this.model.isSelected(index)
-  }
-
-  getSelectedCount(): number {
-    return Number(this.model.getSelection().getSize())
-  }
-
-  isEmpty(): boolean {
-    return this.getSelectedCount() === 0
-  }
-
-  getFirstSelectedIndex(): number {
-    for (let i = 0; i < this.rows.length; i++) {
-      if (this.isSelected(i)) return i
-    }
-    return -1
-  }
-
-  /** Get keys of currently-selected rows (null if selection is empty) */
-  getSelectedKeys(): Set<string> | null {
-    if (this.isEmpty()) return null
-    const keys = new Set<string>()
-    for (let i = 0; i < this.rows.length; i++) {
-      if (this.isSelected(i)) keys.add(this.rows[i]._key)
-    }
-    return keys
-  }
-
-  // Selection modifications
-  selectItem(index: number, unselectOthers: boolean = false): void {
-    this.model.selectItem(index, unselectOthers)
-  }
-
-  unselectItem(index: number): void {
-    this.model.unselectItem(index)
-  }
-
-  selectAll(): void {
-    this.model.selectAll()
-  }
-
-  unselectAll(): void {
-    this.model.unselectAll()
-  }
-
-  invertSelection(): void {
-    for (let i = 0; i < this.rows.length; i++) {
-      if (this.isSelected(i)) this.unselectItem(i)
-      else this.selectItem(i, false)
+  /**
+   * Replace the entire model with new entries.
+   * Used during navigation to show a completely different folder.
+   */
+  reset(entries: GFileInfo[]): void {
+    this._rows = entries
+    this.store.removeAll()
+    for (const info of entries) {
+      this.store.append(info)
     }
   }
 
-  /** Replace the selection with every row whose name matches the shell glob
-   * `pattern` (see core/glob.ts — the same matcher FileView.selectPattern and
-   * Ctrl+S use). Returns the number of rows selected. */
-  selectByGlob(pattern: string): number {
-    const match = globMatcher(pattern)
-    this.unselectAll()
-    let count = 0
-    for (let i = 0; i < this.rows.length; i++) {
-      if (!match(displayName(this.rows[i]))) continue
-      this.selectItem(i, false) // add to selection
-      count++
-    }
-    return count
-  }
-
-  /** Restore selection from saved keys */
-  restoreSelection(savedKeys: Set<string>): void {
-    if (!savedKeys) return
-    this.unselectAll()
-    for (let i = 0; i < this.rows.length; i++) {
-      if (savedKeys.has(this.rows[i]._key)) {
-        this.selectItem(i, false)
+  /**
+   * Insert entries into the model maintaining sort order.
+   * Used during incremental loads and search result streaming.
+   */
+  insertSorted(
+    entries: GFileInfo[],
+    compareFn: (a: GFileInfo, b: GFileInfo) => number
+  ): void {
+    for (const info of entries) {
+      let pos = this._rows.length
+      // Binary search for insertion point
+      let lo = 0, hi = this._rows.length
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2)
+        if (compareFn(this._rows[mid], info) < 0) lo = mid + 1
+        else hi = mid
       }
+      pos = lo
+
+      this._rows.splice(pos, 0, info)
+      this.store.insert(pos, info)
     }
+  }
+
+  /**
+   * Get the URIs of currently selected entries.
+   */
+  getSelectedUris(): string[] {
+    const uris: string[] = []
+    const bitset = this.selection.getSelection()
+    let pos = bitset.getNthMarked(0)
+    while (pos !== GLib.MAXUINT32) {
+      if (pos < this._rows.length) {
+        const info = this._rows[pos]
+        uris.push(info.getAttributeAsString('standard::name'))
+      }
+      pos = bitset.getNthMarked(pos + 1)
+    }
+    return uris
+  }
+
+  /**
+   * Get count of selected entries.
+   */
+  getSelectionCount(): number {
+    return this.selection.getNItems()
+  }
+
+  /**
+   * Calculate total size of selected entries.
+   */
+  getSelectionSize(): bigint {
+    let total = 0n
+    const bitset = this.selection.getSelection()
+    let pos = bitset.getNthMarked(0)
+    while (pos !== GLib.MAXUINT32) {
+      if (pos < this._rows.length) {
+        const info = this._rows[pos]
+        const size = info.getAttributeUInt64('standard::size')
+        total += BigInt(size)
+      }
+      pos = bitset.getNthMarked(pos + 1)
+    }
+    return total
+  }
+
+  /**
+   * Select all entries.
+   */
+  selectAll(): void {
+    this.selection.selectAll()
+  }
+
+  /**
+   * Clear selection.
+   */
+  unselectAll(): void {
+    this.selection.unselectAll()
+  }
+
+  /**
+   * Toggle selection of a specific entry by position.
+   */
+  toggleSelection(pos: number): void {
+    const bitset = this.selection.getSelection()
+    if (bitset.contains(pos)) {
+      this.selection.unselect(pos)
+    } else {
+      this.selection.select(pos)
+    }
+  }
+
+  /**
+   * Schedule a status update on the idle loop.
+   * Coalesces rapid changes into a single update.
+   */
+  private _scheduleStatus(): void {
+    if (this._statusDirty) return
+    this._statusDirty = true
+
+    GLib.idleAdd(GLib.PRIORITY_DEFAULT, () => {
+      this._statusDirty = false
+      const count = this.getSelectionCount()
+      const size = this.getSelectionSize()
+
+      if (this._lastStatus.count !== count || this._lastStatus.size !== size) {
+        this._lastStatus = { count, size }
+        this.onSelectionChanged?.()
+      }
+      return false // Don't repeat
+    })
   }
 }

@@ -46,7 +46,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "node-gtk": "^4.1.1"
+    "node-gtk": "^0.11.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

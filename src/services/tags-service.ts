@@ -1,8 +1,7 @@
 import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
-import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
 import { EventEmitter } from '../core/emitter.ts'
+import { openWalDatabase, readDataVersion } from '../core/sqlite-db.ts'
 import { setTagsColumnFormatter } from '../core/columns.ts'
 import { fileForUri } from '../core/gio.ts'
 import type { GFile, GFileInfo } from '../core/types.ts'
@@ -118,10 +117,9 @@ export class TagsService extends EventEmitter {
   _ensure(): void {
     if (this._ready) return
     this._ready = true
+    this._db = openWalDatabase(DIR, DB_FILE)
+    if (!this._db) return
     try {
-      mkdirSync(DIR, { recursive: true })
-      this._db = new DatabaseSync(DB_FILE)
-      this._db.exec('PRAGMA journal_mode = WAL')
       this._db.exec(`
         CREATE TABLE IF NOT EXISTS tags (
           name TEXT PRIMARY KEY,
@@ -141,7 +139,7 @@ export class TagsService extends EventEmitter {
       `)
       this._migrate()
       this._loadAll()
-      this._dataVersion = this._readDataVersion()
+      this._dataVersion = readDataVersion(this._db)
       this._watch()
     } catch {
       /* Unopenable database (corrupt / no permissions): run memory-only. Tags
@@ -192,7 +190,7 @@ export class TagsService extends EventEmitter {
         if (this._monitorDebounce) return
         this._monitorDebounce = GLib.timeoutAdd(GLib.PRIORITY_DEFAULT, 300, () => {
           this._monitorDebounce = 0
-          const v = this._readDataVersion()
+          const v = readDataVersion(this._db)
           if (v !== this._dataVersion) {
             this._dataVersion = v
             try { this._loadAll() } catch {}
@@ -202,10 +200,6 @@ export class TagsService extends EventEmitter {
         })
       })
     } catch { /* no monitor backend — same-process events still flow */ }
-  }
-
-  _readDataVersion(): number {
-    try { return Number(this._db.prepare('PRAGMA data_version').get().data_version) } catch { return -1 }
   }
 
   /* ---- registry ---- */

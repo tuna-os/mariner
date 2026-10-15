@@ -1,7 +1,6 @@
 import GLib from 'gi:GLib-2.0'
-import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
 import { EventEmitter } from '../core/emitter.ts'
+import { openWalDatabase } from '../core/sqlite-db.ts'
 import { ProcessStream } from '../core/process-stream.ts'
 import { setDirSizeLookup, setDirSizePending } from '../core/format.ts'
 import { isSlowFs } from '../core/drives.ts'
@@ -121,10 +120,9 @@ export class DirSizeService extends EventEmitter {
   _ensure(): void {
     if (this._ready) return
     this._ready = true
+    this._db = openWalDatabase(DIR, DB_FILE)
+    if (!this._db) return
     try {
-      mkdirSync(DIR, { recursive: true })
-      this._db = new DatabaseSync(DB_FILE)
-      this._db.exec('PRAGMA journal_mode = WAL')
       this._db.exec(`
         CREATE TABLE IF NOT EXISTS dir_sizes (
           path TEXT PRIMARY KEY,

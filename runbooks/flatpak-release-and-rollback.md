@@ -9,7 +9,7 @@ The release pipeline for **Mariner** packages the Node.js / `node-gtk` applicati
 - **CI Workflows**:
   - `.github/workflows/ci.yml`: Unit test execution on Node 22.
   - `.github/workflows/publish-flatpak.yml`: Flatpak bundle build and GHCR push.
-- **Central Index Catalog**: `.github/scripts/update-index.py` updating `tuna-os/docs`.
+- **Central Index Catalog**: updated via the reusable `publish-flatpak.yml` workflow this repo calls from [`tuna-os/.github`](https://github.com/tuna-os/.github) (see `.github/workflows/publish-flatpak.yml` in this repo) — there is no locally vendored `update-index.py`.
 
 ---
 
@@ -17,7 +17,7 @@ The release pipeline for **Mariner** packages the Node.js / `node-gtk` applicati
 
 1. **Pre-release Verification**:
    - Run `npm test` and `npm run typecheck` locally.
-   - Verify all GitHub Actions checks pass on `main` branch.
+   - Verify all GitHub Actions checks pass on `master` (this repo's default branch; see `AGENTS.md`).
 2. **Tagging Release**:
    ```bash
    git tag -a v0.2.0 -m "Release Mariner v0.2.0"
@@ -30,11 +30,8 @@ The release pipeline for **Mariner** packages the Node.js / `node-gtk` applicati
 
 ## 3. Failure Troubleshooting & Rollback
 
-### 3.1 Failure: Index Update Failure (`update-index.py`)
-- If central index update in `tuna-os/docs` fails due to authorization or conflict:
-  ```bash
-  python3 .github/scripts/update-index.py --help
-  ```
+### 3.1 Failure: Index Update Failure
+- If central index update in `tuna-os/docs` fails due to authorization or conflict, the failing step runs inside the reusable workflow in `tuna-os/.github`, not a script in this repo — check that workflow's run log in the Actions tab of this run.
 - Re-run the `publish-flatpak.yml` workflow step after verifying `FLATPAK_INDEX_TOKEN`.
 
 ### 3.2 Emergency Rollback Procedure

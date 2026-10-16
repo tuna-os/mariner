@@ -8,6 +8,8 @@ import { fileForPath, fileForUri } from './core/gio.ts'
 import { HOME } from './core/format.ts'
 import { loadStyles } from './ui/style.ts'
 import { ACCELS } from './accels.ts'
+import { ServiceRegistry } from './core/service-registry.ts'
+import { loadViewPrefs } from './services/view-prefs.ts'
 import type { GFile } from './core/types.ts'
 
 /* GTK ≥ 4.22 defaults to the Vulkan renderer, which on NVIDIA-ICD dual-GPU
@@ -63,6 +65,12 @@ function startFile(arg: string | undefined, cwd: string): GFile {
 
 installDiagnostics()
 
+/* Initialize the service registry with default preferences before creating any windows.
+ * This ensures all services are available for dependency injection. */
+const initialPrefs = loadViewPrefs()
+const serviceRegistry = ServiceRegistry.getInstance()
+serviceRegistry.initialize(initialPrefs)
+
 /* Under node-gtk ESM, app.run() returns immediately; an explicit GLib.MainLoop
  * pumps the GLib loop, and is quit when the last window is removed. */
 const loop = GLib.MainLoop.new(null, false)
@@ -87,14 +95,15 @@ app.on('command-line', (commandLine: any) => {
   }
 
   const { mode, targets } = parseInvocation(args)
+  const services = serviceRegistry.getServices()
   if (mode === 'open' || targets.length === 0) {
-    new AppWindow(app, startFile(targets[0], cwd))
+    new AppWindow(app, startFile(targets[0], cwd), services)
   } else {
     const uris = targets.map(t => fileForArg(t, cwd).getUri())
     /* Start at the first item's parent; revealItems groups the rest and opens
      * further tabs for items living in other folders. */
     const first = fileForUri(uris[0])
-    const win = new AppWindow(app, first.getParent() ?? first)
+    const win = new AppWindow(app, first.getParent() ?? first, services)
     if (mode === 'properties') win.showItemProperties(uris)
     else win.revealItems(uris)
   }

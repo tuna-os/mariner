@@ -8,6 +8,7 @@ import Gdk from 'gi:Gdk-4.0'
 import { buildActions } from './action-registry.ts'
 import { appMenu } from './ui/app-menu.ts'
 import { Tab } from './tab.ts'
+import { ServiceRegistry, type Services } from './core/service-registry.ts'
 import { ACCELS, accelHint } from './accels.ts'
 import { fileForPath, fileForUri, ATTRS } from './core/gio.ts'
 import { HOME, locationName, isDirectory, displayName, tildePath } from './core/format.ts'
@@ -19,6 +20,7 @@ import { ArchiveService, isArchive } from './services/archive-service.ts'
 import { archiveRootFile } from './core/archive-uri.ts'
 import { loadWindowState, saveWindowState } from './services/window-state.ts'
 import { debugLog } from './core/debug-log.ts'
+import { loadViewPrefs as loadViewPrefsService } from './services/view-prefs.ts'
 import { promptText, confirm, chooseFolder, showProperties, aboutDialog } from './ui/dialogs.ts'
 import { createSidebar } from './ui/sidebar.ts'
 import { addBookmark, removeBookmark, isBookmarked } from './services/places-service.ts'
@@ -56,15 +58,16 @@ function boolValue(b: boolean): any {
 
 export class AppWindow {
   app: any
-  prefs: Prefs = { showHidden: false, sortKey: 'name', sortDesc: false, iconSize: 64, ...loadViewPrefs() }
+  services: Services
+  prefs: Prefs
   tabs: Tab[] = []
   _activeTab: Tab | null = null
   searching = false
-  clipboard = new ClipboardService()
-  fileOps = new FileOperations()
-  undo = new UndoService()
-  archive = new ArchiveService()
-  opsQueue = new OperationsQueue()
+  clipboard: ClipboardService
+  fileOps: FileOperations
+  undo: UndoService
+  archive: ArchiveService
+  opsQueue: OperationsQueue
   _pasteTarget: GFile | null = null
   _ctxFile: GFile | null = null
   _cutUris = new Set<string>()
@@ -94,10 +97,18 @@ export class AppWindow {
   hiddenAction!: any
   searchAction!: any
 
-  constructor(app: any, startFile: GFile) {
+  constructor(app: any, startFile: GFile, services?: Services) {
     this.app = app
-    dirSizes.enabled = this.prefs.dirSizes
-    dirSizes.ttlMs = this.prefs.dirSizesTtl * 60_000
+    // Use provided services or get from registry
+    this.services = services || ServiceRegistry.getInstance().getServices()
+    this.clipboard = this.services.clipboard
+    this.fileOps = this.services.fileOps
+    this.undo = this.services.undo
+    this.archive = this.services.archive
+    this.opsQueue = this.services.opsQueue
+    
+    // Load preferences
+    this.prefs = { showHidden: false, sortKey: 'name', sortDesc: false, iconSize: 64, ...loadViewPrefsService() }
     this._buildUI()
     buildActions(this)
     this._installShortcuts()
@@ -110,7 +121,7 @@ export class AppWindow {
 
   /* Open a second window at the same location (the win.new-window action). */
   _newWindow(): AppWindow {
-    return new AppWindow(this.app, this.activeTab?.location ?? fileForPath(HOME))
+    return new AppWindow(this.app, this.activeTab?.location ?? fileForPath(HOME), this.services)
   }
 
   _saveState(): void {
@@ -195,7 +206,7 @@ export class AppWindow {
     this.toolbar = createToolbar({
       onNavigate: (file: GFile) => this.navigate(file),
       onOpenTab: (file: GFile) => this.openTab(file),
-      onOpenWindow: (file: GFile) => new AppWindow(this.app, file),
+      onOpenWindow: (file: GFile) => new AppWindow(this.app, file, this.services),
       onProperties: (file: GFile) => this._propertiesFor(file),
       onLocationEntry: (text: string) => this.openPath(text),
       onLocationExit: () => { this.toolbar.showStack('pathbar'); this.activeTab?.view.focusView() },

@@ -3,6 +3,7 @@ import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
 import { resolve } from 'node:path'
 import { AppWindow } from './window.ts'
+import { ServiceRegistry } from './services/service-registry.ts'
 import { debugLog, installDiagnostics } from './core/debug-log.ts'
 import { fileForPath, fileForUri } from './core/gio.ts'
 import { HOME } from './core/format.ts'
@@ -71,6 +72,7 @@ const app = new Adw.Application({
   flags: Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
 })
 let initialized = false
+let services: ServiceRegistry | null = null
 
 app.on('command-line', (commandLine: any) => {
   /* Unlike process.argv, ApplicationCommandLine carries the arguments and cwd
@@ -82,21 +84,23 @@ app.on('command-line', (commandLine: any) => {
   if (!initialized) {
     initialized = true
     loadStyles()
+    services = new ServiceRegistry()
     for (const [action, accels] of Object.entries(ACCELS))
       app.setAccelsForAction(action, accels)
   }
 
   const { mode, targets } = parseInvocation(args)
   if (mode === 'open' || targets.length === 0) {
-    new AppWindow(app, startFile(targets[0], cwd))
+    new AppWindow(app, startFile(targets[0], cwd), services!)
   } else {
     const uris = targets.map(t => fileForArg(t, cwd).getUri())
     /* Start at the first item's parent; revealItems groups the rest and opens
      * further tabs for items living in other folders. */
     const first = fileForUri(uris[0])
-    const win = new AppWindow(app, first.getParent() ?? first)
-    if (mode === 'properties') win.showItemProperties(uris)
+    const win = new AppWindow(app, first.getParent() ?? first, services!)
+      if (mode === 'properties') win.showItemProperties(uris)
     else win.revealItems(uris)
+  }
   }
   /* The initial invocation needs to start the explicit GLib loop. A forwarded
    * invocation is already being dispatched by that loop and must not nest it. */

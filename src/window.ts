@@ -12,10 +12,8 @@ import { ACCELS, accelHint } from './accels.ts'
 import { fileForPath, fileForUri, ATTRS } from './core/gio.ts'
 import { HOME, locationName, isDirectory, displayName, tildePath } from './core/format.ts'
 import { recentFolders } from './services/recent-folders.ts'
-import { ClipboardService } from './services/clipboard-service.ts'
-import { FileOperations } from './services/file-operations.ts'
-import { UndoService } from './services/undo-service.ts'
-import { ArchiveService, isArchive } from './services/archive-service.ts'
+import { ServiceRegistry } from './services/service-registry.ts'
+import { isArchive } from './services/archive-service.ts'
 import { archiveRootFile } from './core/archive-uri.ts'
 import { loadWindowState, saveWindowState } from './services/window-state.ts'
 import { debugLog } from './core/debug-log.ts'
@@ -56,15 +54,18 @@ function boolValue(b: boolean): any {
 
 export class AppWindow {
   app: any
+  services: ServiceRegistry
   prefs: Prefs = { showHidden: false, sortKey: 'name', sortDesc: false, iconSize: 64, ...loadViewPrefs() }
   tabs: Tab[] = []
   _activeTab: Tab | null = null
   searching = false
-  clipboard = new ClipboardService()
-  fileOps = new FileOperations()
-  undo = new UndoService()
-  archive = new ArchiveService()
   opsQueue = new OperationsQueue()
+
+  /* Service accessors for backward compatibility during migration */
+  get clipboard() { return this.services.clipboard }
+  get fileOps() { return this.services.fileOps }
+  get undo() { return this.services.undo }
+  get archive() { return this.services.archive }
   _pasteTarget: GFile | null = null
   _ctxFile: GFile | null = null
   _cutUris = new Set<string>()
@@ -94,8 +95,9 @@ export class AppWindow {
   hiddenAction!: any
   searchAction!: any
 
-  constructor(app: any, startFile: GFile) {
+  constructor(app: any, startFile: GFile, services?: ServiceRegistry) {
     this.app = app
+    this.services = services ?? new ServiceRegistry()
     dirSizes.enabled = this.prefs.dirSizes
     dirSizes.ttlMs = this.prefs.dirSizesTtl * 60_000
     this._buildUI()

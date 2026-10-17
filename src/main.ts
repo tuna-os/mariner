@@ -98,9 +98,8 @@ app.on('command-line', (commandLine: any) => {
      * further tabs for items living in other folders. */
     const first = fileForUri(uris[0])
     const win = new AppWindow(app, first.getParent() ?? first, services!)
-      if (mode === 'properties') win.showItemProperties(uris)
+    if (mode === 'properties') win.showItemProperties(uris)
     else win.revealItems(uris)
-  }
   }
   /* The initial invocation needs to start the explicit GLib loop. A forwarded
    * invocation is already being dispatched by that loop and must not nest it. */

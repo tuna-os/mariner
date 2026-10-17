@@ -40,4 +40,4 @@ jobs:
       # so `||` would silently fall through to C and publish anyway. Confirmed
       # by testing: a workflow_dispatch with publish=false still published.
       publish: ${{ (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
-    secrets: inherit
+    secrets: ${{ github.event_name != 'pull_request' && secrets.all || {} }}

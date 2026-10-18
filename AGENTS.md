@@ -18,19 +18,18 @@ Human docs: [`README.md`](README.md) (features, keybindings),
   not accept, buys a merge conflict every time upstream touches it. Prefer
   changes that are upstreamable, or that live in files upstream does not have.
 
-## Unit tests run in CI; typecheck and biome do not
+## CI gates unit tests, type-checking, and Biome
 
 `package.json` declares `test` (`node --test tests/*.test.ts`) and `typecheck`
-(`tsc --noEmit`), and `biome.json` configures a formatter and linter.
-`.github/workflows/ci.yml` now runs the unit tests on every push and pull
-request, with V8 coverage uploaded as an artifact. **`typecheck` and biome
-still run in no workflow.**
+(`tsc --noEmit`), and `biome.json` configures the formatter and linter.
+`.github/workflows/ci.yml` runs all three checks on every push and pull request,
+with V8 coverage uploaded as an artifact. Its quality job installs dependencies
+with scripts disabled, runs the pinned Biome 1.9.4 checks, then runs
+`npm run typecheck`.
 
-`publish-flatpak.yml` also gates a PR: it builds (without publishing) on pull
-requests, and the Flatpak build's `mariner` module runs `npm run typecheck` as
-a build command. So type errors are still caught only as a Flatpak build
-failure, several minutes and a lot of unrelated machinery away from the
-actual mistake — `ci.yml` did not change that half. biome is caught nowhere.
+`publish-flatpak.yml` also gates pull requests by building without publishing.
+The Flatpak build's `mariner` module runs `npm run typecheck` as a build command,
+but the dedicated CI quality job provides faster, focused feedback.
 
 The tests are cheap to run and need **no `node_modules` at all** — they import
 `src/core/*.ts` directly and rely on Node's built-in type stripping:

@@ -1,11 +1,7 @@
 name: CI
 
-# package.json has declared `test` since the repo was forked, and until now
-# nothing ran it: publish-flatpak builds, screenshots photographs the
-# published app, sync-upstream merges. Type errors were caught only as a
-# side effect of the Flatpak build running `npm run typecheck`, minutes and a
-# lot of unrelated machinery away from the mistake; the unit tests were caught
-# nowhere.
+# Keep fast source validation here. Flatpak packaging also type-checks as part
+# of its build, but that job is slower and tests unrelated packaging machinery.
 
 on:
   push:
@@ -23,6 +19,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  quality:
+    name: Lint and type-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      # TypeScript needs the package declarations, but neither check needs
+      # node-gtk's native install script or GTK build dependencies.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run Biome checks
+        run: npx --yes @biomejs/biome@1.9.4 check .
+
+      - name: Run TypeScript type-check
+        run: npm run typecheck
+
   test:
     name: Unit tests
     runs-on: ubuntu-24.04
@@ -59,8 +77,10 @@ jobs:
 
   required-checks:
     if: always()
-    needs: [test]
+    needs: [quality, test]
     runs-on: ubuntu-24.04
     steps:
       - name: Verify required validation passed
-        run: test "${{ needs.test.result }}" = success
+        run: |
+          test "${{ needs.quality.result }}" = success
+          test "${{ needs.test.result }}" = success

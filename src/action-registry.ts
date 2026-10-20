@@ -3,7 +3,7 @@ import GLib from 'gi:GLib-2.0'
 
 import { fileForPath } from './core/gio.ts'
 import { HOME } from './core/format.ts'
-import { DEFAULT_ZOOM, ZOOM_STEP } from './window.ts'
+import { DEFAULT_ZOOM, ZOOM_STEP } from './core/view-constants.ts'
 import { aboutDialog } from './ui/dialogs.ts'
 import { editTagDialog, deleteTagDialog } from './ui/new-tag-dialog.ts'
 import { tagsService } from './services/tags-service.ts'

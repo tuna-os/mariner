@@ -10,6 +10,7 @@ import { appMenu } from './ui/app-menu.ts'
 import { Tab } from './tab.ts'
 import { ACCELS, accelHint } from './accels.ts'
 import { fileForPath, fileForUri, ATTRS } from './core/gio.ts'
+import { MIN_ZOOM, MAX_ZOOM } from './core/view-constants.ts'
 import { HOME, locationName, isDirectory, displayName, tildePath } from './core/format.ts'
 import { recentFolders } from './services/recent-folders.ts'
 import { ClipboardService } from './services/clipboard-service.ts'
@@ -44,8 +45,6 @@ import { fileClipboardProvider } from './ui/dnd.ts'
 import { CommandPalette } from './ui/command-palette.ts'
 import type { PaletteItem } from './ui/command-palette.ts'
 import type { Prefs, GFile, GFileInfo, Entry, CopyItem, OpError } from './core/types.ts'
-
-export const MIN_ZOOM = 32, MAX_ZOOM = 128, ZOOM_STEP = 16, DEFAULT_ZOOM = 64
 
 function boolValue(b: boolean): any {
   const v = new GObject.Value()

@@ -1,11 +1,13 @@
 name: CI
 
-# package.json has declared `test` since the repo was forked, and until now
-# nothing ran it: publish-flatpak builds, screenshots photographs the
-# published app, sync-upstream merges. Type errors were caught only as a
-# side effect of the Flatpak build running `npm run typecheck`, minutes and a
-# lot of unrelated machinery away from the mistake; the unit tests were caught
-# nowhere.
+# package.json has declared `test` (`node --test tests/*.test.ts`) and
+# `typecheck` (`tsc --noEmit`) since the repo was forked, and biome.json has
+# configured a formatter and linter for just as long; publish-flatpak builds,
+# screenshots photographs the published app, sync-upstream merges. This
+# workflow is where all three are gated: unit tests, `npm run typecheck`, and
+# biome. Before, type errors surfaced only as a Flatpak build failure, minutes
+# and a lot of unrelated machinery away from the mistake, and biome ran
+# nowhere at all.
 
 on:
   push:
@@ -57,10 +59,88 @@ jobs:
           path: coverage/
           retention-days: 90
 
-  required-checks:
-    if: always()
-    needs: [test]
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22.23.1
+
+      # `--ignore-scripts` on purpose: node-gtk's install script compiles
+      # native bindings against GTK4 and gobject-introspection, which this job
+      # has no use for and the runner does not have. tsc never reads the
+      # package either — tsconfig includes only `src`, and `src/gi.d.ts`
+      # declares the `gi:` namespaces locally — so typescript and @types/node
+      # are the whole dependency surface of `npm run typecheck`.
+      - name: Install dependencies without building node-gtk
+        run: npm ci --ignore-scripts --no-fund --no-audit
+
+      - name: Typecheck
+        run: npm run typecheck
+
+  lint:
+    name: Biome
+    runs-on: ubuntu-24.04
+    steps:
+      # Full history: the biome step diffs against the base of the change.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22.23.1
+
+      # Scoped to the files the change touches, not the whole tree. biome has
+      # never run here, so master carries a backlog of diagnostics (271 lines
+      # alone are over biome.json's 100-column limit); reformatting the tree to
+      # turn this job green would rewrite code upstream romgrk/mariner also
+      # owns, and sync-upstream.yml merges that upstream daily — the standing
+      # rule in AGENTS.md is that such rewrites buy a merge conflict every time
+      # upstream touches the file. So new and modified code is enforced and the
+      # backlog is burned down separately.
+      #
+      # Version pinned to biome.json's `$schema`, so the config and the binary
+      # checking against it cannot drift apart. `biome ci` never writes: it
+      # checks formatting, lint rules and import order, and exits non-zero on
+      # any diagnostic.
+      - name: Biome-check the files this change touches
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${BASE_SHA:-}"
+          # `github.event.before` is all-zeros for a branch's first push, and
+          # absent entirely for workflow_dispatch; fall back to the parent
+          # commit, which is the right base for a merge_group run too.
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git rev-parse --verify --quiet HEAD^ || true)"
+          fi
+          if [ -z "$base" ]; then
+            echo "No comparison base for this event; nothing to check."
+            exit 0
+          fi
+          files="$(git diff --name-only --diff-filter=ACMR "${base}...HEAD" -- src tests | grep -E '\.ts$' || true)"
+          if [ -z "$files" ]; then
+            echo "No TypeScript files changed against ${base}."
+            exit 0
+          fi
+          echo "$files"
+          # shellcheck disable=SC2086 # paths are git-reported, newline-split on purpose
+          npx --yes @biomejs/biome@1.9.4 ci $files
+
+  required-checks:
+    if: always()
+    needs: [test, typecheck, lint]
+    runs-on: ubuntu-24.04
+    steps:
+      # Every gate named individually, so adding a job above without adding it
+      # here cannot silently leave it ungated.
       - name: Verify required validation passed
-        run: test "${{ needs.test.result }}" = success
+        run: |
+          test "${{ needs.test.result }}" = success
+          test "${{ needs.typecheck.result }}" = success
+          test "${{ needs.lint.result }}" = success

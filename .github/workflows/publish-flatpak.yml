@@ -35,6 +35,7 @@ jobs:
       manifest-path: org.tunaos.mariner.json
       repo-name: tuna-os/mariner
       publish: false
+    secrets: inherit
 
   publish:
     if: github.event_name != 'pull_request'

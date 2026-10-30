@@ -31,7 +31,6 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
-      packages: read
     uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@c9f1efaa0b84849b955b7deee47a8401234564c2
     with:
       app-id: org.tunaos.mariner

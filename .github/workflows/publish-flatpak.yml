@@ -21,23 +21,37 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: write
-  packages: write
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Pull requests get a build-only run with a read-only token. Secrets are
+  # still inherited because the shared reusable workflow fails to start
+  # without them; the publish/index steps are gated off by publish: false.
+  validate:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@c9f1efaa0b84849b955b7deee47a8401234564c2
+    with:
+      app-id: org.tunaos.mariner
+      manifest-path: org.tunaos.mariner.json
+      repo-name: tuna-os/mariner
+      publish: false
+    secrets: inherit
+
   publish:
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
+      packages: write
     uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@c9f1efaa0b84849b955b7deee47a8401234564c2
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json
       repo-name: tuna-os/mariner
       # Not `A && B || C` -- if B (inputs.publish) is false, that's falsy,
-      # so `||` would silently fall through to C and publish anyway. Confirmed
-      # by testing: a workflow_dispatch with publish=false still published.
-      publish: ${{ (github.event_name != 'workflow_dispatch' && github.event_name != 'pull_request') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+      # so `||` would silently fall through to C and publish anyway.
+      publish: ${{ github.event_name != 'workflow_dispatch' || inputs.publish }}
     secrets: inherit

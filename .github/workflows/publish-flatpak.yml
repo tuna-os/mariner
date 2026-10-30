@@ -29,8 +29,6 @@ jobs:
   # Pull requests get a build-only run with a read-only token and no secrets.
   validate:
     if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
     uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@c9f1efaa0b84849b955b7deee47a8401234564c2
     with:
       app-id: org.tunaos.mariner

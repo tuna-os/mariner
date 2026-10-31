@@ -18,19 +18,31 @@ Human docs: [`README.md`](README.md) (features, keybindings),
   not accept, buys a merge conflict every time upstream touches it. Prefer
   changes that are upstreamable, or that live in files upstream does not have.
 
-## Unit tests run in CI; typecheck and biome do not
+## ci.yml gates unit tests, typecheck and biome
 
 `package.json` declares `test` (`node --test tests/*.test.ts`) and `typecheck`
 (`tsc --noEmit`), and `biome.json` configures a formatter and linter.
-`.github/workflows/ci.yml` now runs the unit tests on every push and pull
-request, with V8 coverage uploaded as an artifact. **`typecheck` and biome
-still run in no workflow.**
+`.github/workflows/ci.yml` runs all three on every push and pull request —
+`test` (with V8 coverage uploaded as an artifact), `typecheck`, and biome — and
+a `required-checks` job asserts each one succeeded.
 
 `publish-flatpak.yml` also gates a PR: it builds (without publishing) on pull
 requests, and the Flatpak build's `mariner` module runs `npm run typecheck` as
-a build command. So type errors are still caught only as a Flatpak build
-failure, several minutes and a lot of unrelated machinery away from the
-actual mistake — `ci.yml` did not change that half. biome is caught nowhere.
+a build command. That is still true, but it is no longer the first place a
+type error shows up.
+
+Two things about those jobs are deliberate:
+
+- **The typecheck job installs with `npm ci --ignore-scripts`.** node-gtk's
+  install script builds native bindings against GTK4 and
+  gobject-introspection, and tsc never reads the package anyway: `tsconfig`
+  includes only `src`, and `src/gi.d.ts` declares the `gi:` namespaces
+  locally. typescript and @types/node are the whole dependency surface.
+- **The biome job only checks the files a change touches.** biome had never
+  run, so `master` carries a backlog of diagnostics; reformatting the tree to
+  clear it would rewrite code upstream also owns, which costs a merge conflict
+  on every `sync-upstream` run. The biome version is pinned to `biome.json`'s
+  `$schema` (1.9.4) so config and binary cannot drift.
 
 The tests are cheap to run and need **no `node_modules` at all** — they import
 `src/core/*.ts` directly and rely on Node's built-in type stripping:

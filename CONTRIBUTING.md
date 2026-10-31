@@ -35,12 +35,17 @@ typelibs (`Gtk-4.0`, `Adw-1`).
 > checkout for developing the two together; a plain `npm install` pulls
 > `node-gtk` from the npm registry instead.
 
-Before submitting a change, run both validation commands:
+Before submitting a change, run the validation commands CI gates:
 
 ```sh
 npm test
 npm run typecheck
+npx @biomejs/biome@1.9.4 check <the files you touched>
 ```
+
+CI runs biome only over the files a change touches — `master` predates the
+linter and still carries diagnostics — so a repo-wide `biome check` will
+report problems that are not yours.
 
 `npm test` runs the service and core-logic tests under `tests/` using Node's
 built-in test runner. UI changes still need a manual launch with `npm start`

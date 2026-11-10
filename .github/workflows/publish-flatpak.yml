@@ -29,6 +29,10 @@ jobs:
   # Pull requests get a build-only run with a read-only token. Secrets are
   # still inherited because the shared reusable workflow fails to start
   # without them; the publish/index steps are gated off by publish: false.
+  # This stays on the older reusable commit: later ones grant their publish
+  # and release-bundles jobs write scopes, which a read-only caller can't
+  # allow, so the run would fail to start. It never pushes the index, so it
+  # doesn't need the deploy key the publish job below uses.
   validate:
     if: github.event_name == 'pull_request'
     permissions:
@@ -46,7 +50,9 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@c9f1efaa0b84849b955b7deee47a8401234564c2
+    # At or after tuna-os/.github#360: pushes the central index with the
+    # FLATPAK_INDEX_DEPLOY_KEY org secret (forwarded by `secrets: inherit`).
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@4078f531ac74703f203bde835ef6c25e9321b97b # main
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json

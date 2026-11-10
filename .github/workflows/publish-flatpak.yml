@@ -26,9 +26,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Pull requests get a build-only run with a read-only token. Secrets are
-  # still inherited because the shared reusable workflow fails to start
-  # without them; the publish/index steps are gated off by publish: false.
+  # Pull requests get a build-only run with a read-only token and no
+  # repository secrets. The shared reusable workflow marks
+  # FLATPAK_INDEX_TOKEN as required, so it gets an empty value; only the
+  # publish/index steps use it, and publish: false turns those off.
   validate:
     if: github.event_name == 'pull_request'
     permissions:
@@ -39,7 +40,8 @@ jobs:
       manifest-path: org.tunaos.mariner.json
       repo-name: tuna-os/mariner
       publish: false
-    secrets: inherit
+    secrets:
+      FLATPAK_INDEX_TOKEN: ''
 
   publish:
     if: github.event_name != 'pull_request'

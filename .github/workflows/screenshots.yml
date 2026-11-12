@@ -27,7 +27,9 @@ jobs:
     # job container does not have.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Flatpak
         run: |
@@ -70,7 +72,7 @@ jobs:
       # intermittently carry a codec-error toast that only shows up by
       # looking at the image. The committed PNG is updated by a human (or an
       # agent) who has seen this artifact.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: screenshots
           path: docs/screenshots/

@@ -48,7 +48,7 @@ The tests are cheap to run and need **no `node_modules` at all** — they import
 `src/core/*.ts` directly and rely on Node's built-in type stripping:
 
 ```bash
-node --test tests/*.test.ts   # 19 tests across 9 suites, well under a second, zero install
+node --test tests/*.test.ts   # 23 tests across 10 suites, well under a second, zero install
 ```
 
 `npm run typecheck` does need dependencies installed.

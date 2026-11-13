@@ -1,8 +1,10 @@
+import { compressArgv } from '../core/archive-argv.ts'
+import type { ArchiveFormat } from '../core/archive-argv.ts'
 import { EventEmitter } from '../core/emitter.ts'
 import { ProcessStream } from '../core/process-stream.ts'
 import type { GFile } from '../core/types.ts'
 
-export type ArchiveFormat = 'zip' | 'tar.xz' | 'tar.gz' | '7z'
+export type { ArchiveFormat }
 
 const ARCHIVE_RE = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2?|tar\.xz|txz|tar\.zst|7z|rar|jar)$/i
 
@@ -106,15 +108,4 @@ function extractArgv(path: string, dest: string): string[] | null {
   if (p.endsWith('.7z')) return ['7z', 'x', '-y', '-o' + dest, path]
   if (p.endsWith('.rar')) return ['unar', '-f', '-o', dest, path]
   return null
-}
-
-function compressArgv(format: ArchiveFormat, out: string, names: string[]): string[] {
-  switch (format) {
-    case 'zip': return ['zip', '-r', out, ...names]
-    // `names` come from the filesystem and may begin with '-'.  Terminate
-    // tar's option parsing so a crafted filename cannot become a tar option.
-    case 'tar.gz': return ['tar', '-czf', out, '--', ...names]
-    case 'tar.xz': return ['tar', '-cJf', out, '--', ...names]
-    case '7z': return ['7z', 'a', out, ...names]
-  }
 }

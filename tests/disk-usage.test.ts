@@ -9,7 +9,29 @@ import type { UsageNode } from '../src/core/disk-usage.ts'
 
 /* Run scanTree to completion and resolve with the final root. */
 function scan(dir: string, depth: number, isCancelled = () => false): Promise<UsageNode> {
-  return new Promise(resolve => scanTree(dir, depth, (root, done) => { if (done) resolve(root) }, isCancelled))
+  return new Promise((resolve) =>
+    scanTree(
+      dir,
+      depth,
+      (root, done) => {
+        if (done) resolve(root)
+      },
+      isCancelled,
+    ),
+  )
+}
+
+/* The node's children, failing the test if they were not recorded. */
+function kids(node: UsageNode): UsageNode[] {
+  assert.ok(node.children, `${node.name} has recorded children`)
+  return node.children
+}
+
+/* The named child of a node, failing the test if it is missing. */
+function child(node: UsageNode, name: string): UsageNode {
+  const found = kids(node).find((c) => c.name === name)
+  assert.ok(found, `${name} is a child of ${node.name}`)
+  return found
 }
 
 let base: string
@@ -29,25 +51,34 @@ after(() => rmSync(base, { recursive: true, force: true }))
 describe('scanTree', () => {
   test('directory bytes sum the full subtree, past the depth limit', async () => {
     const root = await scan(base, 1)
-    const big = root.children!.find(c => c.name === 'big')!
+    const big = child(root, 'big')
     assert.equal(big.bytes, 400)
     assert.equal(big.children, undefined, 'children are not recorded beyond the depth')
-    assert.equal(root.bytes, root.children!.reduce((sum, c) => sum + c.bytes, 0))
+    assert.equal(
+      root.bytes,
+      kids(root).reduce((sum, c) => sum + c.bytes, 0),
+    )
   })
 
   test('children are recorded down to the depth and sorted largest first', async () => {
     const root = await scan(base, 3)
-    const sizes = root.children!.map(c => c.bytes)
-    assert.deepEqual(sizes, [...sizes].sort((a, b) => b - a))
-    const big = root.children!.find(c => c.name === 'big')!
-    assert.deepEqual(big.children!.map(c => c.name), ['deep', 'a.bin'])
-    assert.equal(big.children![0].isDir, true)
-    assert.equal(big.children![1].isDir, false)
+    const sizes = kids(root).map((c) => c.bytes)
+    assert.deepEqual(
+      sizes,
+      [...sizes].sort((a, b) => b - a),
+    )
+    const big = child(root, 'big')
+    assert.deepEqual(
+      kids(big).map((c) => c.name),
+      ['deep', 'a.bin'],
+    )
+    assert.equal(kids(big)[0].isDir, true)
+    assert.equal(kids(big)[1].isDir, false)
   })
 
   test('hidden entries are included', async () => {
     const root = await scan(base, 1)
-    assert.ok(root.children!.some(c => c.name === '.hidden'))
+    assert.ok(kids(root).some((c) => c.name === '.hidden'))
   })
 
   test('symlinked directories are counted but not descended', async () => {
@@ -57,10 +88,10 @@ describe('scanTree', () => {
       writeFileSync(join(dir, 'real', 'x.bin'), Buffer.alloc(1000))
       symlinkSync(join(dir, 'real'), join(dir, 'link'))
       const root = await scan(dir, 2)
-      const link = root.children!.find(c => c.name === 'link')!
+      const link = child(root, 'link')
       assert.equal(link.isDir, false)
       assert.ok(link.bytes < 1000, 'link size is the link itself, not its target')
-      assert.equal(root.children!.find(c => c.name === 'real')!.bytes, 1000)
+      assert.equal(child(root, 'real').bytes, 1000)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -74,8 +105,13 @@ describe('scanTree', () => {
 
   test('cancelling before the scan starts reports no progress', async () => {
     const calls: boolean[] = []
-    scanTree(base, 2, (_root, done) => calls.push(done), () => true)
-    await new Promise(resolve => setTimeout(resolve, 100))
+    scanTree(
+      base,
+      2,
+      (_root, done) => calls.push(done),
+      () => true,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 100))
     assert.deepEqual(calls, [])
   })
 })

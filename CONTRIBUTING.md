@@ -18,6 +18,59 @@ The guide covers prerequisites, verified `just` setup, credentials, provider
 costs, and how to stop with Ctrl+C. Your subscription quota or API charges apply.
 Never post account credentials or API keys in issues or pull requests.
 
+## System setup
+
+`npm install` compiles the node-gtk native addon against your system GTK
+whenever no prebuilt binary matches your Node version. That needs a C toolchain,
+the GTK / libadwaita / GObject-Introspection development files, and Node ≥ 22.18.
+Install them before the first `npm install`.
+
+Build prerequisites, by distribution. The Arch list is the `makedepends` and
+`depends` of [`packaging/aur/PKGBUILD`](packaging/aur/PKGBUILD); the Fedora and
+Debian/Ubuntu lines name the same components in each distribution's packages.
+
+```sh
+# Arch Linux
+sudo pacman -S --needed base-devel nodejs npm node-gyp python pkgconf \
+  gobject-introspection cairo glib2 gtk4 libadwaita
+
+# Fedora
+sudo dnf install gcc-c++ make python3 pkgconf-pkg-config nodejs npm \
+  gtk4-devel libadwaita-devel gobject-introspection-devel cairo-devel glib2-devel
+
+# Ubuntu / Debian
+sudo apt install build-essential python3 pkg-config nodejs npm \
+  libgtk-4-dev libadwaita-1-dev libgirepository1.0-dev libcairo2-dev libglib2.0-dev \
+  gir1.2-gtk-4.0 gir1.2-adw-1
+```
+
+Some distributions ship a Node or GTK older than the minimum. Check both before
+you build:
+
+```sh
+node --version                                          # v22.18 or newer
+pkg-config --modversion gtk4 libadwaita-1 gobject-introspection-1.0
+```
+
+GTK must be ≥ 4.16 and libadwaita ≥ 1.5. For an older Node, install a current one
+with NodeSource, nvm, or fnm. For an older GTK, use a newer release or the Flatpak.
+
+If `npm install` stops on a missing dependency, match the module named in the
+error to the package that provides it:
+
+| Error names | Install (Fedora / Debian and Ubuntu) |
+| --- | --- |
+| `gtk4` | `gtk4-devel` / `libgtk-4-dev` |
+| `libadwaita-1` | `libadwaita-devel` / `libadwaita-1-dev` |
+| `gobject-introspection-1.0` | `gobject-introspection-devel` / `libgirepository1.0-dev` |
+| `cairo` | `cairo-devel` / `libcairo2-dev` |
+| `glib-2.0` | `glib2-devel` / `libglib2.0-dev` |
+| `pkg-config` not found, or `make` / `g++` not found | `pkgconf-pkg-config`, `gcc-c++`, `make` / `pkg-config`, `build-essential` |
+
+At startup, a `gi.require` failure for `Gtk` 4.0 or `Adw` 1 means the GIR typelib
+is missing. Install the typelib package (`gir1.2-gtk-4.0`, `gir1.2-adw-1` on
+Debian and Ubuntu).
+
 ## Development
 
 ```sh

@@ -10,7 +10,9 @@ describe('globToRegExp', () => {
   })
 
   test('surrounding whitespace is trimmed', () => {
-    assert.ok(globToRegExp('  a*  ')!.test('abc'))
+    const re = globToRegExp('  a*  ')
+    assert.ok(re)
+    assert.ok(re.test('abc'))
   })
 })
 

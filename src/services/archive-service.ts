@@ -8,7 +8,9 @@ export type { ArchiveFormat }
 
 const ARCHIVE_RE = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2?|tar\.xz|txz|tar\.zst|7z|rar|jar)$/i
 
-export function isArchive(name: string): boolean { return ARCHIVE_RE.test(name) }
+export function isArchive(name: string): boolean {
+  return ARCHIVE_RE.test(name)
+}
 
 /* C locale so the per-file lines we count aren't localized. */
 const ENV = { LC_ALL: 'C' }
@@ -16,12 +18,30 @@ const ENV = { LC_ALL: 'C' }
 let nextArchiveId = 0
 
 /* Running progress for one op; `onLine` mutates it as the tool emits per-file lines. */
-interface Prog { done: number; total: number }
-type LineParser = (line: string, p: Prog) => boolean   /* true → emit an update */
+interface Prog {
+  done: number
+  total: number
+}
+type LineParser = (line: string, p: Prog) => boolean /* true → emit an update */
 
-const count7z: LineParser = (line, p) => { if (/^- /.test(line)) { p.done++; return true } return false }
-const countUnzip: LineParser = (line, p) => { if (/(inflating|extracting|creating|linking):/.test(line)) { p.done++; return true } return false }
-const countTar: LineParser = (_line, p) => { p.done++; return true }
+const count7z: LineParser = (line, p) => {
+  if (/^- /.test(line)) {
+    p.done++
+    return true
+  }
+  return false
+}
+const countUnzip: LineParser = (line, p) => {
+  if (/(inflating|extracting|creating|linking):/.test(line)) {
+    p.done++
+    return true
+  }
+  return false
+}
+const countTar: LineParser = (_line, p) => {
+  p.done++
+  return true
+}
 
 /* Extract/compress by shelling out to standard CLI tools via ProcessStream
  * (streams to completion; nautilus uses libarchive/gnome-autoar). GTK-free.
@@ -32,8 +52,12 @@ const countTar: LineParser = (_line, p) => { p.done++; return true }
 export class ArchiveService extends EventEmitter {
   _streams = new Map<number, ProcessStream>()
 
-  pause(id: number): void { this._streams.get(id)?.pause() }
-  resume(id: number): void { this._streams.get(id)?.resume() }
+  pause(id: number): void {
+    this._streams.get(id)?.pause()
+  }
+  resume(id: number): void {
+    this._streams.get(id)?.resume()
+  }
 
   async extract(archive: GFile, destDir: GFile): Promise<void> {
     const path = archive.getPath()
@@ -45,7 +69,10 @@ export class ArchiveService extends EventEmitter {
     /* Determinate for the formats with a cheap index read + per-file output. */
     if (p.endsWith('.7z')) {
       const total = await this._count(['7z', 'l', '-ba', path])
-      return this._run(title, ['7z', 'x', '-y', '-bd', '-bb1', '-o' + dest, path], { total, onLine: count7z })
+      return this._run(title, ['7z', 'x', '-y', '-bd', '-bb1', `-o${dest}`, path], {
+        total,
+        onLine: count7z,
+      })
     }
     if (p.endsWith('.zip') || p.endsWith('.jar')) {
       const total = await this._count(['unzip', '-Z1', path])
@@ -65,47 +92,71 @@ export class ArchiveService extends EventEmitter {
   compress(files: GFile[], out: GFile, format: ArchiveFormat): void {
     const outPath = out.getPath()
     const parent = files.length ? files[0].getParent() : null
-    const cwd = parent && parent.getPath()
-    if (!outPath || !cwd) return this._fail('Compress', 'Not a local location')
-    const names = files.map(f => f.getBasename())
-    this._run(`Compressing ${names.length} item${names.length > 1 ? 's' : ''}`, compressArgv(format, outPath, names), { cwd })
+    const cwd = parent?.getPath()
+    if (!outPath || !cwd) {
+      this._fail('Compress', 'Not a local location')
+      return
+    }
+    const names = files.map((f) => f.getBasename())
+    this._run(
+      `Compressing ${names.length} item${names.length > 1 ? 's' : ''}`,
+      compressArgv(format, outPath, names),
+      { cwd },
+    )
   }
 
   /* Count stdout lines of a quick listing command (entry count for progress). Best
    * effort: resolves 0 on failure, which leaves the op indeterminate (pulsing). */
   _count(argv: string[]): Promise<number> {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       let n = 0
       const s = new ProcessStream(argv, { env: ENV, rawLines: true })
-      s.on('line', () => { n++ })
+      s.on('line', () => {
+        n++
+      })
       s.on('end', () => resolve(n))
       s.start()
     })
   }
 
-  _run(title: string, argv: string[], opts: { cwd?: string; total?: number; onLine?: LineParser } = {}): void {
+  _run(
+    title: string,
+    argv: string[],
+    opts: { cwd?: string; total?: number; onLine?: LineParser } = {},
+  ): void {
     const id = ++nextArchiveId
     const prog: Prog = { done: 0, total: opts.total ?? 0 }
     this.emit('begin', { id, title })
     if (prog.total > 0) this.emit('progress', { id, title, done: 0, total: prog.total })
     const stream = new ProcessStream(argv, { cwd: opts.cwd, env: ENV, rawLines: true })
     this._streams.set(id, stream)
-    if (opts.onLine) stream.on('line', (line: string) => {
-      if (opts.onLine!(line, prog)) this.emit('progress', { id, title, done: prog.done, total: prog.total })
+    const onLine = opts.onLine
+    if (onLine)
+      stream.on('line', (line: string) => {
+        if (onLine(line, prog))
+          this.emit('progress', { id, title, done: prog.done, total: prog.total })
+      })
+    stream.on('error', (message: string) => {
+      this._streams.delete(id)
+      this.emit('error', { id, title, message })
     })
-    stream.on('error', (message: string) => { this._streams.delete(id); this.emit('error', { id, title, message }) })
-    stream.on('end', (ok: boolean) => { this._streams.delete(id); if (ok) this.emit('done', { id, title }) })
+    stream.on('end', (ok: boolean) => {
+      this._streams.delete(id)
+      if (ok) this.emit('done', { id, title })
+    })
     stream.start()
   }
 
-  _fail(title: string, message: string): void { this.emit('error', { title, message }) }
+  _fail(title: string, message: string): void {
+    this.emit('error', { title, message })
+  }
 }
 
 function extractArgv(path: string, dest: string): string[] | null {
   const p = path.toLowerCase()
   if (p.endsWith('.zip') || p.endsWith('.jar')) return ['unzip', '-o', path, '-d', dest]
   if (/\.(tar(\.(gz|bz2|xz|zst))?|tgz|tbz2?|txz)$/.test(p)) return ['tar', '-xf', path, '-C', dest]
-  if (p.endsWith('.7z')) return ['7z', 'x', '-y', '-o' + dest, path]
+  if (p.endsWith('.7z')) return ['7z', 'x', '-y', `-o${dest}`, path]
   if (p.endsWith('.rar')) return ['unar', '-f', '-o', dest, path]
   return null
 }

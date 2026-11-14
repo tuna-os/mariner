@@ -137,9 +137,53 @@ jobs:
           # shellcheck disable=SC2086 # paths are git-reported, newline-split on purpose
           npx --yes @biomejs/biome@1.9.4 ci $files
 
+  # The two suites below import `gi:` modules, so they need node-gtk's native
+  # addon and the system GTK4/GObject-Introspection libraries. The `test` job
+  # deliberately has neither, so both suites always skip there and a
+  # regression in the BigInt sort or the thumbnail cache bound would ship
+  # with a green check. This job runs them for real and fails if either one
+  # skips again (typelib drift, a failed addon build).
+  gtk-tests:
+    name: GTK-dependent unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6.5.0
+        with:
+          node-version: 22.23.1
+
+      # The build dependencies packaging/aur/PKGBUILD lists for node-gtk.
+      - name: Install GTK4 and GObject-Introspection
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgtk-4-dev gir1.2-gtk-4.0 \
+            libgirepository1.0-dev gobject-introspection libcairo2-dev \
+            libglib2.0-dev pkg-config python3 build-essential xvfb
+
+      # No --ignore-scripts here: node-gtk's install script is the point.
+      - name: Install dependencies and build node-gtk
+        run: npm ci --no-fund --no-audit
+
+      # TAP output marks a skipped suite with `# SKIP`, while the summary line
+      # says `skipped 0` whatever happened, so the grep is the real check.
+      - name: Run the gi:-dependent suites and fail on any skip
+        run: |
+          set -euo pipefail
+          xvfb-run -a node --import node-gtk/register --test \
+            --test-reporter=tap \
+            tests/comparator.test.ts tests/thumbnail-service.test.ts | tee gtk-tests.tap
+          if grep -E '# SKIP' gtk-tests.tap; then
+            echo "::error::a gi:-dependent suite skipped; it must run in this job"
+            exit 1
+          fi
+
   required-checks:
     if: always()
-    needs: [test, typecheck, lint]
+    needs: [test, typecheck, lint, gtk-tests]
     runs-on: ubuntu-24.04
     steps:
       # Every gate named individually, so adding a job above without adding it
@@ -149,3 +193,4 @@ jobs:
           test "${{ needs.test.result }}" = success
           test "${{ needs.typecheck.result }}" = success
           test "${{ needs.lint.result }}" = success
+          test "${{ needs.gtk-tests.result }}" = success

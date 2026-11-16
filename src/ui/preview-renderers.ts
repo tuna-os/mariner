@@ -4,6 +4,7 @@ import Gdk from 'gi:Gdk-4.0'
 import GLib from 'gi:GLib-2.0'
 import { open } from 'node:fs/promises'
 import { displayName, formatType, formatSize, formatModified, isDirectory } from '../core/format.ts'
+import { escapeMarkup } from '../core/markup.ts'
 import type { GFile, GFileInfo } from '../core/types.ts'
 
 /* Per-content-type preview builders for Quick Look. Each returns a widget
@@ -88,7 +89,7 @@ function metadataCard(info: GFileInfo, file: GFile): any {
   const mod = formatModified(info)
   if (mod) parts.push(mod)
   const path = file.getPath()
-  page.setDescription(parts.filter(Boolean).join(' · ') + (path ? `\n${path}` : ''))
+  page.setDescription(escapeMarkup(parts.filter(Boolean).join(' · ') + (path ? `\n${path}` : '')))
   return page
 }
 

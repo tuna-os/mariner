@@ -1,6 +1,7 @@
 import Gtk from 'gi:Gtk-4.0'
 import Adw from 'gi:Adw-1'
 import { displayName } from '../core/format.ts'
+import { escapeMarkup } from '../core/markup.ts'
 import type { Entry, GFile } from '../core/types.ts'
 
 export interface RenamePlan { file: GFile; from: string; to: string }
@@ -60,7 +61,7 @@ export function batchRenameDialog(parent: any, entries: Entry[]): Promise<Rename
         const from = names[i]
         const to = nameFor(from, i, mode)
         if (to && to !== from) plan.push({ file: e.file, from, to })
-        list.append(new Adw.ActionRow({ title: from, subtitle: to }))
+        list.append(new Adw.ActionRow({ title: escapeMarkup(from), subtitle: escapeMarkup(to) }))
       })
       apply.setSensitive(plan.length > 0)
     }

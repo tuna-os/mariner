@@ -2,6 +2,7 @@ import Gtk from 'gi:Gtk-4.0'
 import Adw from 'gi:Adw-1'
 import Gio from 'gi:Gio-2.0'
 import { displayName } from '../core/format.ts'
+import { escapeMarkup } from '../core/markup.ts'
 import type { GFile, GFileInfo } from '../core/types.ts'
 
 /* "Open With" chooser: lists the apps registered for the file's content type
@@ -24,7 +25,7 @@ export function openWithDialog(parent: any, info: GFileInfo, file: GFile): void 
 
   if (!list.length) group.add(new Adw.ActionRow({ title: 'No applications found' }))
   for (const app of list) {
-    const row = new Adw.ActionRow({ title: app.getDisplayName(), activatable: true })
+    const row = new Adw.ActionRow({ title: escapeMarkup(app.getDisplayName()), activatable: true })
     const icon = app.getIcon()
     if (icon) { const img = new Gtk.Image(); img.setFromGicon(icon); row.addPrefix(img) }
     row.on('activated', () => {

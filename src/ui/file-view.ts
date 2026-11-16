@@ -14,6 +14,7 @@ import { fuzzyMatch } from '../core/fuzzy-match.ts'
 import { COLUMN_DEF, TRASH_COLUMN, defaultColumnConfig } from '../core/columns.ts'
 import { FloatingBar } from './floating-bar.ts'
 import { globMatcher } from '../core/glob.ts'
+import { escapeMarkup } from '../core/markup.ts'
 import { makeDragSource, makeDropTarget } from './dnd.ts'
 import type { ColumnConfig, Entry, GFile, GFileInfo, ViewConfig, ViewMode, EmptyKind } from '../core/types.ts'
 
@@ -525,7 +526,7 @@ export class FileView {
     this.all = []
     this.rows = []
     this.store.removeAll()
-    this._errorPage.setDescription(message || 'The location could not be read.')
+    this._errorPage.setDescription(escapeMarkup(message || 'The location could not be read.'))
     this.stack.setVisibleChildName('error')
   }
 

@@ -1245,7 +1245,7 @@ export class AppWindow {
   }
 
   toast(text: string, action?: { label: string; name: string }): void {
-    const t = new Adw.Toast({ title: text })
+    const t = new Adw.Toast({ title: text, useMarkup: false })
     if (action) { t.setButtonLabel(action.label); t.setActionName(action.name) }
     this.toastOverlay.addToast(t)
   }

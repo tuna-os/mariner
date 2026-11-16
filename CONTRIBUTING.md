@@ -101,8 +101,12 @@ linter and still carries diagnostics — so a repo-wide `biome check` will
 report problems that are not yours.
 
 `npm test` runs the service and core-logic tests under `tests/` using Node's
-built-in test runner. UI changes still need a manual launch with `npm start`
-because the automated suite does not exercise GTK widgets.
+built-in test runner. Without node-gtk loaded, the two `gi:`-dependent suites
+(`tests/comparator.test.ts` and `tests/thumbnail-service.test.ts`) skip
+without saying so in the summary. CI's `gtk-tests` job runs them; see
+[AGENTS.md](AGENTS.md) for the local command. UI changes still need a manual
+launch with `npm start` because the automated suite does not exercise GTK
+widgets.
 
 ## Architecture
 

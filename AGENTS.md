@@ -23,8 +23,9 @@ Human docs: [`README.md`](README.md) (features, keybindings),
 `package.json` declares `test` (`node --test tests/*.test.ts`) and `typecheck`
 (`tsc --noEmit`), and `biome.json` configures a formatter and linter.
 `.github/workflows/ci.yml` runs all three on every push and pull request —
-`test` (with V8 coverage uploaded as an artifact), `typecheck`, and biome — and
-a `required-checks` job asserts each one succeeded.
+`test` (with V8 coverage uploaded as an artifact), `typecheck`, and biome — plus
+a `gtk-tests` job for the suites that need node-gtk, and a `required-checks`
+job asserts each of the four succeeded.
 
 `publish-flatpak.yml` also gates a PR: it builds (without publishing) on pull
 requests, and the Flatpak build's `mariner` module runs `npm run typecheck` as
@@ -49,6 +50,19 @@ The tests are cheap to run and need **no `node_modules` at all** — they import
 
 ```bash
 node --test tests/*.test.ts   # 44 tests across 14 suites, well under a second, zero install
+```
+
+Two of those suites, `comparator (BigInt gint64)` and `ThumbnailService cache
+bound`, import `gi:` modules and skip themselves when node-gtk is not loaded.
+The summary line still says `skipped 0`; only `--test-reporter=tap` shows the
+`# SKIP`. So a green local run has not run them. The `gtk-tests` job in
+`ci.yml` runs them with node-gtk built and fails on any skip. To run them
+locally, install GTK4 and gobject-introspection, run `npm ci` (with install
+scripts, so node-gtk builds), then:
+
+```bash
+xvfb-run -a node --import node-gtk/register --test --test-reporter=tap \
+  tests/comparator.test.ts tests/thumbnail-service.test.ts
 ```
 
 `npm run typecheck` does need dependencies installed.

@@ -44,7 +44,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@1ad6fffee8ef4ce504d6e14dc7aa7ac8318984bd # main # zizmor: ignore[ref-version-mismatch] pinned to a reviewed main commit; Renovate bumps the digest, so main may be ahead
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@6c76230bdd69e19634d9c74d5e3edbd8eacadd9f # main # zizmor: ignore[ref-version-mismatch] pinned to a reviewed main commit; Renovate bumps the digest, so main may be ahead
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json
@@ -59,7 +59,7 @@ jobs:
     # At or after tuna-os/.github#360: pushes the central index with the
     # FLATPAK_INDEX_DEPLOY_KEY org secret (FLATPAK_INDEX_TOKEN is the fallback
     # it reads when the key is absent). These are the only secrets it declares.
-    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@1ad6fffee8ef4ce504d6e14dc7aa7ac8318984bd # main # zizmor: ignore[ref-version-mismatch] pinned to a reviewed main commit; Renovate bumps the digest, so main may be ahead
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@6c76230bdd69e19634d9c74d5e3edbd8eacadd9f # main # zizmor: ignore[ref-version-mismatch] pinned to a reviewed main commit; Renovate bumps the digest, so main may be ahead
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json

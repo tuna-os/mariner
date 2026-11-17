@@ -26,26 +26,30 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Pull requests get a build-only run with a read-only token. The token
-  # secret is still passed because the shared reusable workflow marks it
-  # required and fails to start without it; the publish/index steps are
-  # gated off by publish: false.
-  # This stays on the older reusable commit: later ones grant their publish
-  # and release-bundles jobs write scopes, which a read-only caller can't
-  # allow, so the run would fail to start. It never pushes the index, so it
-  # doesn't need the deploy key the publish job below uses.
+  # Pull requests get a build-only run: publish: false gates off the GHCR
+  # push, the index update and the release upload, and no secret is passed.
+  # Same reusable commit as the publish job, so a PR builds exactly what
+  # master will publish -- including the flatpak-copy-up step that keeps the
+  # x86_64 build working on runner hosts whose overlayfs returns EXDEV.
+  #
+  # Why this grants write scopes on a pull request: GitHub refuses to start a
+  # called workflow if any of its jobs declares more than the caller allows,
+  # even a job its `if:` skips, and the reusable workflow's publish and
+  # release-bundles jobs declare packages: write / contents: write. These
+  # are only a ceiling. The job that runs PR code, build-oci, takes the
+  # reusable workflow's top-level `contents: read`, and the two write jobs
+  # never run with publish: false. Fork PRs get a read-only token anyway.
   validate:
     if: github.event_name == 'pull_request'
     permissions:
-      contents: read
-    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@c9f1efaa0b84849b955b7deee47a8401234564c2
+      contents: write
+      packages: write
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@1ad6fffee8ef4ce504d6e14dc7aa7ac8318984bd # main # zizmor: ignore[ref-version-mismatch] pinned to a reviewed main commit; Renovate bumps the digest, so main may be ahead
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json
       repo-name: tuna-os/mariner
       publish: false
-    secrets:
-      FLATPAK_INDEX_TOKEN: ${{ secrets.FLATPAK_INDEX_TOKEN }}
 
   publish:
     if: github.event_name != 'pull_request'
@@ -55,7 +59,7 @@ jobs:
     # At or after tuna-os/.github#360: pushes the central index with the
     # FLATPAK_INDEX_DEPLOY_KEY org secret (FLATPAK_INDEX_TOKEN is the fallback
     # it reads when the key is absent). These are the only secrets it declares.
-    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@4f08bf7b295f70306352e0e865b7f3d5bc08d5f6 # main # zizmor: ignore[ref-version-mismatch] pinned to a reviewed main commit; Renovate bumps the digest, so main may be ahead
+    uses: tuna-os/.github/.github/workflows/publish-flatpak.yml@1ad6fffee8ef4ce504d6e14dc7aa7ac8318984bd # main # zizmor: ignore[ref-version-mismatch] pinned to a reviewed main commit; Renovate bumps the digest, so main may be ahead
     with:
       app-id: org.tunaos.mariner
       manifest-path: org.tunaos.mariner.json

@@ -1,48 +1,53 @@
-import Gtk from 'gi:Gtk-4.0'
 import Adw from 'gi:Adw-1'
-import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
 import GObject from 'gi:GObject-2.0'
 import Gdk from 'gi:Gdk-4.0'
+import Gio from 'gi:Gio-2.0'
+import Gtk from 'gi:Gtk-4.0'
 
-import { buildActions } from './action-registry.ts'
-import { appMenu } from './ui/app-menu.ts'
-import { Tab } from './tab.ts'
 import { ACCELS, accelHint } from './accels.ts'
-import { fileForPath, fileForUri, ATTRS } from './core/gio.ts'
-import { MIN_ZOOM, MAX_ZOOM } from './core/view-constants.ts'
-import { HOME, locationName, isDirectory, displayName, tildePath } from './core/format.ts'
+import { buildActions } from './action-registry.ts'
+import { archiveRootFile } from './core/archive-uri.ts'
+import { debugLog } from './core/debug-log.ts'
+import { HOME, displayName, isDirectory, locationName, tildePath } from './core/format.ts'
+import { ATTRS, fileForPath, fileForUri } from './core/gio.ts'
+import type { CopyItem, Entry, GFile, GFileInfo, OpError, Prefs } from './core/types.ts'
+import { MAX_ZOOM, MIN_ZOOM } from './core/view-constants.ts'
+import { isArchive } from './services/archive-service.ts'
+import { dirSizes } from './services/dir-size-service.ts'
+import { addBookmark, isBookmarked, removeBookmark } from './services/places-service.ts'
 import { recentFolders } from './services/recent-folders.ts'
 import { ServiceRegistry } from './services/service-registry.ts'
-import { isArchive } from './services/archive-service.ts'
-import { archiveRootFile } from './core/archive-uri.ts'
-import { loadWindowState, saveWindowState } from './services/window-state.ts'
-import { debugLog } from './core/debug-log.ts'
-import { promptText, confirm, chooseFolder, showProperties, aboutDialog } from './ui/dialogs.ts'
-import { createSidebar } from './ui/sidebar.ts'
-import { addBookmark, removeBookmark, isBookmarked } from './services/places-service.ts'
-import { tagsService, tagUri, isTagUri } from './services/tags-service.ts'
-import { dirSizes } from './services/dir-size-service.ts'
-import { newTagDialog, editTagDialog, deleteTagDialog } from './ui/new-tag-dialog.ts'
-import { tagIconName } from './ui/tag-icons.ts'
-import { customMenuSupported, buildTagDotsRow, buildTagListRows, TAG_DOTS_FIT } from './ui/tag-menu.ts'
-import type { TagMenuItem, TagMenuContext } from './ui/context-menu.ts'
-import { createToolbar } from './ui/toolbar.ts'
-import { batchRenameDialog } from './ui/batch-rename.ts'
-import { compressDialog } from './ui/compress.ts'
-import { buildContextMenu } from './ui/context-menu.ts'
-import { columnChooserDialog } from './ui/column-chooser.ts'
-import { loadViewPrefs, saveViewPrefs } from './services/view-prefs.ts'
+import { isTagUri, tagUri, tagsService } from './services/tags-service.ts'
 import { spawnTerminal } from './services/terminal.ts'
+import { loadViewPrefs, saveViewPrefs } from './services/view-prefs.ts'
+import { loadWindowState, saveWindowState } from './services/window-state.ts'
+import { Tab } from './tab.ts'
+import { appMenu } from './ui/app-menu.ts'
+import { batchRenameDialog } from './ui/batch-rename.ts'
+import { columnChooserDialog } from './ui/column-chooser.ts'
 import { createCommandPanel } from './ui/command-bar.ts'
 import type { CommandPanel } from './ui/command-bar.ts'
-import { QuickLook } from './ui/preview.ts'
-import { OperationsQueue } from './ui/operations-queue.ts'
-import { planTransfer } from './ui/conflict-dialog.ts'
-import { fileClipboardProvider } from './ui/dnd.ts'
 import { CommandPalette } from './ui/command-palette.ts'
 import type { PaletteItem } from './ui/command-palette.ts'
-import type { Prefs, GFile, GFileInfo, Entry, CopyItem, OpError } from './core/types.ts'
+import { compressDialog } from './ui/compress.ts'
+import { planTransfer } from './ui/conflict-dialog.ts'
+import type { TagMenuContext, TagMenuItem } from './ui/context-menu.ts'
+import { buildContextMenu } from './ui/context-menu.ts'
+import { aboutDialog, chooseFolder, confirm, promptText, showProperties } from './ui/dialogs.ts'
+import { fileClipboardProvider } from './ui/dnd.ts'
+import { deleteTagDialog, editTagDialog, newTagDialog } from './ui/new-tag-dialog.ts'
+import { OperationsQueue } from './ui/operations-queue.ts'
+import { QuickLook } from './ui/preview.ts'
+import { createSidebar } from './ui/sidebar.ts'
+import { tagIconName } from './ui/tag-icons.ts'
+import {
+  TAG_DOTS_FIT,
+  buildTagDotsRow,
+  buildTagListRows,
+  customMenuSupported,
+} from './ui/tag-menu.ts'
+import { createToolbar } from './ui/toolbar.ts'
 
 function boolValue(b: boolean): any {
   const v = new GObject.Value()
@@ -54,17 +59,31 @@ function boolValue(b: boolean): any {
 export class AppWindow {
   app: any
   services: ServiceRegistry
-  prefs: Prefs = { showHidden: false, sortKey: 'name', sortDesc: false, iconSize: 64, ...loadViewPrefs() }
+  prefs: Prefs = {
+    showHidden: false,
+    sortKey: 'name',
+    sortDesc: false,
+    iconSize: 64,
+    ...loadViewPrefs(),
+  }
   tabs: Tab[] = []
   _activeTab: Tab | null = null
   searching = false
   opsQueue = new OperationsQueue()
 
   /* Service accessors for backward compatibility during migration */
-  get clipboard() { return this.services.clipboard }
-  get fileOps() { return this.services.fileOps }
-  get undo() { return this.services.undo }
-  get archive() { return this.services.archive }
+  get clipboard() {
+    return this.services.clipboard
+  }
+  get fileOps() {
+    return this.services.fileOps
+  }
+  get undo() {
+    return this.services.undo
+  }
+  get archive() {
+    return this.services.archive
+  }
   _pasteTarget: GFile | null = null
   _ctxFile: GFile | null = null
   _cutUris = new Set<string>()
@@ -107,7 +126,9 @@ export class AppWindow {
     this.window.present()
   }
 
-  get activeTab(): Tab | null { return this._activeTab }
+  get activeTab(): Tab | null {
+    return this._activeTab
+  }
 
   /* Open a second window at the same location (the win.new-window action). */
   _newWindow(): AppWindow {
@@ -129,7 +150,8 @@ export class AppWindow {
     for (const [action, accels] of Object.entries(ACCELS))
       for (const accel of accels) {
         const trigger = Gtk.ShortcutTrigger.parseString(accel)
-        if (trigger) controller.addShortcut(new Gtk.Shortcut({ trigger, action: Gtk.NamedAction.new(action) }))
+        if (trigger)
+          controller.addShortcut(new Gtk.Shortcut({ trigger, action: Gtk.NamedAction.new(action) }))
       }
     this.window.addController(controller)
 
@@ -162,7 +184,11 @@ export class AppWindow {
       debugLog('close-request', `windows=${this.app.getWindows().length}`)
       /* A throw here must not skip the exit below, or the window closes but the
        * process lingers with no logged reason. */
-      try { this._saveState() } catch (e: any) { debugLog('save-state-failed', e?.stack ?? String(e)) }
+      try {
+        this._saveState()
+      } catch (e: any) {
+        debugLog('save-state-failed', e?.stack ?? String(e))
+      }
       /* When the last window closes, exit the process: node-gtk keeps it alive
        * even after the GTK loop winds down, so an explicit exit is needed. */
       if (this.app.getWindows().length <= 1) process.exit(0)
@@ -175,7 +201,11 @@ export class AppWindow {
     this.window.addCssClass('view')
 
     this.toastOverlay = new Adw.ToastOverlay()
-    this.split = new Adw.OverlaySplitView({ maxSidebarWidth: 240, sidebarWidthFraction: 0.2, showSidebar: true })
+    this.split = new Adw.OverlaySplitView({
+      maxSidebarWidth: 240,
+      sidebarWidthFraction: 0.2,
+      showSidebar: true,
+    })
 
     /* Sidebar */
     this.sidebar = createSidebar(
@@ -187,7 +217,13 @@ export class AppWindow {
     const sidebarView = new Adw.ToolbarView()
     const sidebarHeader = new Adw.HeaderBar()
     sidebarHeader.setTitleWidget(new Adw.WindowTitle({ title: 'Mariner' }))
-    sidebarHeader.packEnd(new Gtk.MenuButton({ iconName: 'open-menu-symbolic', tooltipText: 'Main Menu', menuModel: appMenu() }))
+    sidebarHeader.packEnd(
+      new Gtk.MenuButton({
+        iconName: 'open-menu-symbolic',
+        tooltipText: 'Main Menu',
+        menuModel: appMenu(),
+      }),
+    )
     sidebarView.addTopBar(sidebarHeader)
     sidebarView.setContent(this.sidebar.widget)
     this.split.setSidebar(sidebarView)
@@ -199,10 +235,15 @@ export class AppWindow {
       onOpenWindow: (file: GFile) => new AppWindow(this.app, file),
       onProperties: (file: GFile) => this._propertiesFor(file),
       onLocationEntry: (text: string) => this.openPath(text),
-      onLocationExit: () => { this.toolbar.showStack('pathbar'); this.activeTab?.view.focusView() },
+      onLocationExit: () => {
+        this.toolbar.showStack('pathbar')
+        this.activeTab?.view.focusView()
+      },
       onSearchChanged: (text: string) => this.activeTab?.setSearchQuery(text),
       onSearchFilter: (f) => this.activeTab?.setSearchFilter(f),
-      onSearchExit: () => { if (this.searching) this._setSearch(false) },
+      onSearchExit: () => {
+        if (this.searching) this._setSearch(false)
+      },
       onSearchActivate: () => this.activeTab?.view.widget.grabFocus(),
     })
     this.toolbar.packTrailing(this.opsQueue.button)
@@ -211,10 +252,14 @@ export class AppWindow {
     this.tabView.on('close-page', (...a: any[]) => this._onClosePage(a[a.length - 1]))
     const tabBar = new Adw.TabBar({ view: this.tabView, autohide: true })
 
-    this._trashBanner = new Adw.Banner({ title: 'Items in the Trash will be permanently deleted after 30 days', buttonLabel: 'Empty Trash', revealed: false })
+    this._trashBanner = new Adw.Banner({
+      title: 'Items in the Trash will be permanently deleted after 30 days',
+      buttonLabel: 'Empty Trash',
+      revealed: false,
+    })
     this._trashBanner.on('button-clicked', () => this._emptyTrash())
 
-    this.commandPanel = createCommandPanel(msg => this.toast(msg))
+    this.commandPanel = createCommandPanel((msg) => this.toast(msg))
 
     const contentView = new Adw.ToolbarView()
     contentView.addTopBar(this.toolbar.header)
@@ -228,10 +273,14 @@ export class AppWindow {
     this.window.setContent(this.toastOverlay)
 
     try {
-      const bp = new Adw.Breakpoint({ condition: Adw.BreakpointCondition.parse('max-width: 682sp') })
+      const bp = new Adw.Breakpoint({
+        condition: Adw.BreakpointCondition.parse('max-width: 682sp'),
+      })
       bp.addSetter(this.split, 'collapsed', boolValue(true))
       this.window.addBreakpoint(bp)
-    } catch { /* responsive collapse is optional */ }
+    } catch {
+      /* responsive collapse is optional */
+    }
   }
 
   /* ---- File-operation feedback ---- */
@@ -249,7 +298,9 @@ export class AppWindow {
 
     /* Quick-op success toasts are shown by the window methods that record undo,
      * so they can attach an "Undo" button; the service's 'notify' is unused. */
-    this.fileOps.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
+    this.fileOps.on('error', ({ title, message }: OpError) =>
+      this.toast(`${title} failed: ${message}`),
+    )
     this.undo.on('changed', () => {
       this.undoAction.setEnabled(this.undo.canUndo)
       this.redoAction.setEnabled(this.undo.canRedo)
@@ -257,13 +308,15 @@ export class AppWindow {
 
     /* Track cut files so the view can dim them until pasted. */
     this.clipboard.on('changed', () => {
-      this._cutUris = new Set(this.clipboard.cut ? this.clipboard.files.map(f => f.getUri()) : [])
+      this._cutUris = new Set(this.clipboard.cut ? this.clipboard.files.map((f) => f.getUri()) : [])
       for (const p of this.activeTab?.panes ?? []) p.view.refreshCells()
     })
 
     /* Archive ops also flow through the queue (indeterminate); toast on finish. */
     this.archive.on('done', ({ title }: { title: string }) => this.toast(`${title} — done`))
-    this.archive.on('error', ({ title, message }: OpError) => this.toast(`${title} failed: ${message}`))
+    this.archive.on('error', ({ title, message }: OpError) =>
+      this.toast(`${title} failed: ${message}`),
+    )
 
     /* Tag changes repaint every pane's cell dots and refresh any open tag://
      * listing (the sidebar rebuilds itself — it subscribes in createSidebar).
@@ -272,7 +325,10 @@ export class AppWindow {
      * under it would tear the menu down mid-use (the inline tag dots toggle
      * without closing it). Flushed when the popover closes. */
     tagsService.on('changed', () => {
-      if (this._ctxPopover) { this._pendingTagsChanged = true; return }
+      if (this._ctxPopover) {
+        this._pendingTagsChanged = true
+        return
+      }
       this._applyTagsChanged()
     })
     /* Folder-size results repaint their cells in place (see cells.ts) — no
@@ -295,8 +351,9 @@ export class AppWindow {
     this.prefs.dirSizes = v
     dirSizes.enabled = v
     saveViewPrefs(this.prefs)
-    if (v) { for (const p of this.activeTab?.panes ?? []) p.queueDirSizes() }
-    else dirSizes.clear()
+    if (v) {
+      for (const p of this.activeTab?.panes ?? []) p.queueDirSizes()
+    } else dirSizes.clear()
     for (const tab of this.tabs) for (const p of tab.panes) p.view.refreshCells()
   }
 
@@ -323,23 +380,29 @@ export class AppWindow {
 
   /* ---- Tags ---- */
   /* The Tags overview is a location (tag:///), not a dialog. */
-  _manageTags(): void { this.navigate(fileForUri('tag:///')) }
+  _manageTags(): void {
+    this.navigate(fileForUri('tag:///'))
+  }
 
   /* New Tag dialog; when invoked with a selection (the context menu's
    * "New Tag…"), the created tag is applied to it right away. */
   async _newTag(): Promise<void> {
-    const files = this._selectedFiles().filter(f => f.getUri().startsWith('file://'))
+    const files = this._selectedFiles().filter((f) => f.getUri().startsWith('file://'))
     const tag = await newTagDialog(this.window)
     if (!tag) return
     if (files.length) {
-      const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
+      const before = files.map((f) => [f, tagsService.tagsOf(f.getUri())] as const)
       tagsService.addTag(files, tag.name)
       this.undo.push({
         undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
         redo: () => tagsService.addTag(files, tag.name),
-        undoLabel: 'Undo Tag Change', redoLabel: 'Redo Tag Change',
+        undoLabel: 'Undo Tag Change',
+        redoLabel: 'Redo Tag Change',
       })
-      this.toast(`Created “${tag.name}” and tagged ${files.length} item${files.length > 1 ? 's' : ''}`, { label: 'Undo', name: 'win.undo' })
+      this.toast(
+        `Created “${tag.name}” and tagged ${files.length} item${files.length > 1 ? 's' : ''}`,
+        { label: 'Undo', name: 'win.undo' },
+      )
     } else {
       this.toast(`Created tag “${tag.name}”`)
     }
@@ -352,13 +415,16 @@ export class AppWindow {
   _buildTagActions(files: GFile[]): TagMenuItem[] {
     const tags = tagsService.visibleTags()
     for (let i = 0; i < this._tagActionCount; i++) {
-      try { this.window.removeAction('tag-toggle-' + i) } catch {}
+      try {
+        this.window.removeAction('tag-toggle-' + i)
+      } catch {}
       delete this._actions['tag-toggle-' + i]
     }
     this._tagActionCount = tags.length
     return tags.map((t, i) => {
       const name = 'tag-toggle-' + i
-      const state = files.length > 0 && files.every(f => tagsService.tagsOf(f.getUri()).includes(t.name))
+      const state =
+        files.length > 0 && files.every((f) => tagsService.tagsOf(f.getUri()).includes(t.name))
       const a = Gio.SimpleAction.newStateful(name, null, GLib.Variant.newBoolean(state))
       a.on('change-state', () => this._toggleTag(files, t.name))
       this.window.addAction(a)
@@ -369,40 +435,53 @@ export class AppWindow {
 
   _toggleTag(files: GFile[], tag: string): void {
     if (!files.length) return
-    const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
+    const before = files.map((f) => [f, tagsService.tagsOf(f.getUri())] as const)
     tagsService.toggleTag(files, tag)
     this.undo.push({
       undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
       redo: () => tagsService.toggleTag(files, tag),
-      undoLabel: 'Undo Tag Change', redoLabel: 'Redo Tag Change',
+      undoLabel: 'Undo Tag Change',
+      redoLabel: 'Redo Tag Change',
     })
   }
 
   _removeAllTags(): void {
-    const files = this._selectedFiles().filter(f => tagsService.tagsOf(f.getUri()).length)
+    const files = this._selectedFiles().filter((f) => tagsService.tagsOf(f.getUri()).length)
     if (!files.length) return
-    const before = files.map(f => [f, tagsService.tagsOf(f.getUri())] as const)
+    const before = files.map((f) => [f, tagsService.tagsOf(f.getUri())] as const)
     tagsService.removeAllTags(files)
     this.undo.push({
       undo: () => before.forEach(([f, tags]) => tagsService.setTags(f, [...tags])),
       redo: () => tagsService.removeAllTags(files),
-      undoLabel: 'Undo Remove Tags', redoLabel: 'Redo Remove Tags',
+      undoLabel: 'Undo Remove Tags',
+      redoLabel: 'Redo Remove Tags',
     })
-    this.toast(`Removed tags from ${files.length} item${files.length > 1 ? 's' : ''}`, { label: 'Undo', name: 'win.undo' })
+    this.toast(`Removed tags from ${files.length} item${files.length > 1 ? 's' : ''}`, {
+      label: 'Undo',
+      name: 'win.undo',
+    })
   }
 
   /* Analyze disk usage of the selected folder (or the current location): opens
    * Properties with the "Disk Usage" chart pre-expanded. Local paths only. */
   _diskUsage(): void {
     const sel = this._selected()[0]
-    if (sel && isDirectory(sel.info)) { showProperties(this.window, sel.info, sel.file, { expandUsage: true }); return }
+    if (sel && isDirectory(sel.info)) {
+      showProperties(this.window, sel.info, sel.file, { expandUsage: true })
+      return
+    }
     const loc = this.activeTab?.location
-    if (loc && loc.getPath()) { this._propertiesFor(loc, { expandUsage: true }); return }
+    if (loc && loc.getPath()) {
+      this._propertiesFor(loc, { expandUsage: true })
+      return
+    }
     this.toast('Disk usage is only available for local folders')
   }
 
   /* ---- Command palette ---- */
-  _activate(name: string): void { this._actions[name]?.activate(null) }
+  _activate(name: string): void {
+    this._actions[name]?.activate(null)
+  }
 
   _openPalette(): void {
     if (!this._palette) this._palette = new CommandPalette(this.window)
@@ -428,19 +507,29 @@ export class AppWindow {
       const origParent = files[0].getParent()
       let dests = this.fileOps.moveItems(plan.items, plan.prune)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else if (origParent) this.undo.push({
-        undo: () => { dests = this.fileOps.move(dests, origParent) },
-        redo: () => { dests = this.fileOps.moveItems(plan.items, plan.prune) },
-        undoLabel: 'Undo Move', redoLabel: 'Redo Move',
-      })
+      else if (origParent)
+        this.undo.push({
+          undo: () => {
+            dests = this.fileOps.move(dests, origParent)
+          },
+          redo: () => {
+            dests = this.fileOps.moveItems(plan.items, plan.prune)
+          },
+          undoLabel: 'Undo Move',
+          redoLabel: 'Redo Move',
+        })
     } else {
       let dests = this.fileOps.copyItems(plan.items)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else this.undo.push({
-        undo: () => this.fileOps.trash(dests),
-        redo: () => { dests = this.fileOps.copyItems(plan.items) },
-        undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
-      })
+      else
+        this.undo.push({
+          undo: () => this.fileOps.trash(dests),
+          redo: () => {
+            dests = this.fileOps.copyItems(plan.items)
+          },
+          undoLabel: 'Undo Copy',
+          redoLabel: 'Redo Copy',
+        })
     }
   }
 
@@ -452,11 +541,19 @@ export class AppWindow {
   _paletteItems(): PaletteItem[] {
     const items: PaletteItem[] = []
     const added = new Set<string>()
-    const act = (label: string, name: string, opts: { icon?: string; primary?: boolean } = {}): void => {
+    const act = (
+      label: string,
+      name: string,
+      opts: { icon?: string; primary?: boolean } = {},
+    ): void => {
       if (added.has(name)) return
       added.add(name)
       items.push({
-        label, group: 'action', search: label, icon: opts.icon, primary: !!opts.primary,
+        label,
+        group: 'action',
+        search: label,
+        icon: opts.icon,
+        primary: !!opts.primary,
         detail: accelHint('win.' + name),
         run: () => this._activate(name),
       })
@@ -480,19 +577,27 @@ export class AppWindow {
       act('Open', 'open', { icon: 'document-open-symbolic', primary: true })
       if (isDir) act('Open in New Tab', 'open-new-tab', { icon: 'tab-new-symbolic', primary: true })
       else act('Open With…', 'open-with', { icon: 'emblem-system-symbolic', primary: true })
-      if (this._canShowInFolder(tab, sel)) act('Show in Folder', 'show-in-folder', { icon: 'folder-symbolic', primary: true })
+      if (this._canShowInFolder(tab, sel))
+        act('Show in Folder', 'show-in-folder', { icon: 'folder-symbolic', primary: true })
       act('Preview', 'preview', { icon: 'view-reveal-symbolic', primary: true })
       act('Cut', 'cut', { icon: 'edit-cut-symbolic', primary: true })
       act('Copy', 'copy', { icon: 'edit-copy-symbolic', primary: true })
-      if (isDir && !clipEmpty) act('Paste Into Folder', 'paste', { icon: 'edit-paste-symbolic', primary: true })
+      if (isDir && !clipEmpty)
+        act('Paste Into Folder', 'paste', { icon: 'edit-paste-symbolic', primary: true })
       act('Rename…', 'rename', { icon: 'document-edit-symbolic', primary: true })
       act('Create Link', 'create-link', { icon: 'insert-link-symbolic', primary: true })
       act('Move to Trash', 'trash', { icon: 'user-trash-symbolic', primary: true })
       act('Delete Permanently', 'delete', { icon: 'edit-delete-symbolic', primary: true })
-      if (isArchive(displayName(target.info))) act('Extract Here', 'extract-here', { icon: 'archive-extract-symbolic', primary: true })
+      if (isArchive(displayName(target.info)))
+        act('Extract Here', 'extract-here', { icon: 'archive-extract-symbolic', primary: true })
       act('Compress…', 'compress', { icon: 'package-x-generic-symbolic', primary: true })
-      if (isImage) act('Set as Wallpaper', 'set-wallpaper', { icon: 'preferences-desktop-wallpaper-symbolic', primary: true })
-      if (isDir) act('Analyze Disk Usage', 'disk-usage', { icon: 'drive-harddisk-symbolic', primary: true })
+      if (isImage)
+        act('Set as Wallpaper', 'set-wallpaper', {
+          icon: 'preferences-desktop-wallpaper-symbolic',
+          primary: true,
+        })
+      if (isDir)
+        act('Analyze Disk Usage', 'disk-usage', { icon: 'drive-harddisk-symbolic', primary: true })
       act('Properties', 'properties', { icon: 'document-properties-symbolic', primary: true })
     } else if (inTrash) {
       act('Empty Trash', 'empty-trash', { icon: 'user-trash-full-symbolic', primary: true })
@@ -501,34 +606,55 @@ export class AppWindow {
       act('New Folder…', 'new-folder', { icon: 'folder-new-symbolic', primary: true })
       if (!clipEmpty) act('Paste', 'paste', { icon: 'edit-paste-symbolic', primary: true })
       act('Select All', 'select-all', { icon: 'edit-select-all-symbolic', primary: true })
-      act('Open in Terminal', 'open-terminal', { icon: 'utilities-terminal-symbolic', primary: true })
+      act('Open in Terminal', 'open-terminal', {
+        icon: 'utilities-terminal-symbolic',
+        primary: true,
+      })
       act('Analyze Disk Usage', 'disk-usage', { icon: 'drive-harddisk-symbolic', primary: true })
     }
 
     /* Bookmark the selected folder — or the current folder if none is selected —
      * toggling to "Remove Bookmark" when it's already bookmarked. */
-    const bmFile = target && isDirectory(target.info) ? target.file : tab?.location ?? null
+    const bmFile = target && isDirectory(target.info) ? target.file : (tab?.location ?? null)
     if (bmFile && !inTrash && bmFile.getUri().startsWith('file://')) {
       if (isBookmarked(bmFile))
-        items.push({ label: 'Remove Bookmark', group: 'action', search: 'Remove Bookmark', icon: 'user-bookmarks-symbolic', primary: true, run: () => this._removeBookmark(bmFile) })
+        items.push({
+          label: 'Remove Bookmark',
+          group: 'action',
+          search: 'Remove Bookmark',
+          icon: 'user-bookmarks-symbolic',
+          primary: true,
+          run: () => this._removeBookmark(bmFile),
+        })
       else
-        items.push({ label: 'Add Bookmark', group: 'action', search: 'Add Bookmark', icon: 'bookmark-new-symbolic', primary: true, detail: accelHint('win.add-bookmark'), run: () => this._addBookmark(bmFile) })
+        items.push({
+          label: 'Add Bookmark',
+          group: 'action',
+          search: 'Add Bookmark',
+          icon: 'bookmark-new-symbolic',
+          primary: true,
+          detail: accelHint('win.add-bookmark'),
+          run: () => this._addBookmark(bmFile),
+        })
     }
 
     /* Tag toggles for the selection (query-only, so the empty-query list stays
      * lean), plus remove-all when anything selected is tagged. */
     if (target && !inTrash && tagsService.enabled) {
-      const files = sel.map(s => s.file).filter(f => f.getUri().startsWith('file://'))
+      const files = sel.map((s) => s.file).filter((f) => f.getUri().startsWith('file://'))
       if (files.length === sel.length && files.length > 0) {
         for (const t of tagsService.visibleTags()) {
-          const has = files.every(f => tagsService.tagsOf(f.getUri()).includes(t.name))
+          const has = files.every((f) => tagsService.tagsOf(f.getUri()).includes(t.name))
           items.push({
             label: has ? `Remove tag ${t.name}` : `Add tag ${t.name}`,
-            group: 'action', search: `add remove tag ${t.name}`, icon: tagIconName(),
+            group: 'action',
+            search: `add remove tag ${t.name}`,
+            icon: tagIconName(),
             run: () => this._toggleTag(files, t.name),
           })
         }
-        if (files.some(f => tagsService.tagsOf(f.getUri()).length)) act('Remove All Tags', 'tag-clear', { icon: tagIconName() })
+        if (files.some((f) => tagsService.tagsOf(f.getUri()).length))
+          act('Remove All Tags', 'tag-clear', { icon: tagIconName() })
       }
     }
 
@@ -537,8 +663,11 @@ export class AppWindow {
     for (const t of tagsService.visibleTags()) {
       const count = tagCounts.get(t.name) ?? 0
       items.push({
-        label: `Show tag ${t.name}`, detail: `${count} file${count === 1 ? '' : 's'}`, group: 'folder',
-        icon: tagIconName(), search: `show tag ${t.name}`,
+        label: `Show tag ${t.name}`,
+        detail: `${count} file${count === 1 ? '' : 's'}`,
+        group: 'folder',
+        icon: tagIconName(),
+        search: `show tag ${t.name}`,
         run: () => this.navigate(fileForUri(tagUri(t.name))),
       })
     }
@@ -546,8 +675,24 @@ export class AppWindow {
     /* Dual-pane targets (primary when split + selection). The search text carries
      * a "split pane" alias so a query for "split" surfaces them too. */
     if (tab?.isSplit && sel.length) {
-      items.push({ label: 'Copy to Other Pane', group: 'action', search: 'Copy to Other Pane split', icon: 'edit-copy-symbolic', primary: true, detail: accelHint('win.copy-to-other-pane'), run: () => this._activate('copy-to-other-pane') })
-      items.push({ label: 'Move to Other Pane', group: 'action', search: 'Move to Other Pane split', icon: 'go-next-symbolic', primary: true, detail: accelHint('win.move-to-other-pane'), run: () => this._activate('move-to-other-pane') })
+      items.push({
+        label: 'Copy to Other Pane',
+        group: 'action',
+        search: 'Copy to Other Pane split',
+        icon: 'edit-copy-symbolic',
+        primary: true,
+        detail: accelHint('win.copy-to-other-pane'),
+        run: () => this._activate('copy-to-other-pane'),
+      })
+      items.push({
+        label: 'Move to Other Pane',
+        group: 'action',
+        search: 'Move to Other Pane split',
+        icon: 'go-next-symbolic',
+        primary: true,
+        detail: accelHint('win.move-to-other-pane'),
+        run: () => this._activate('move-to-other-pane'),
+      })
     }
 
     /* Recent folders (primary), most-frecent first, excluding the current one. */
@@ -559,7 +704,11 @@ export class AppWindow {
       const label = locationName(file)
       const detail = tildePath(file)
       items.push({
-        label, detail, group: 'folder', icon: 'folder-symbolic', primary: true,
+        label,
+        detail,
+        group: 'folder',
+        icon: 'folder-symbolic',
+        primary: true,
         search: `${label} ${detail}`,
         frecencyBonus: (r.score / maxScore) * 0.25,
         run: () => this.navigate(file),
@@ -633,7 +782,7 @@ export class AppWindow {
 
   /* Show/hide one sidebar item/section (Preferences → Sidebar). */
   _setSidebarItemVisible(id: string, visible: boolean): void {
-    const hidden = this.prefs.sidebarHidden.filter(h => h !== id)
+    const hidden = this.prefs.sidebarHidden.filter((h) => h !== id)
     if (!visible) hidden.push(id)
     this.prefs.sidebarHidden = hidden
     saveViewPrefs(this.prefs)
@@ -644,7 +793,7 @@ export class AppWindow {
    * edits are visible as they apply (columns only affect the list). */
   _chooseColumns(): void {
     if (this.prefs.viewMode !== 'list') this._setViewMode('list')
-    columnChooserDialog(this.window, this.prefs.columns, columns => {
+    columnChooserDialog(this.window, this.prefs.columns, (columns) => {
       this.prefs.columns = columns
       this.activeTab?.applyColumns()
       saveViewPrefs(this.prefs)
@@ -661,7 +810,9 @@ export class AppWindow {
     return tab
   }
 
-  navigate(file: GFile): void { this.activeTab?.navigate(file) }
+  navigate(file: GFile): void {
+    this.activeTab?.navigate(file)
+  }
 
   /* Open each item's parent folder and select the item within it — the window
    * side of org.freedesktop.FileManager1.ShowItems ("Show in folder"). Items are
@@ -672,7 +823,10 @@ export class AppWindow {
     const groups = new Map<string, { parent: GFile; children: string[] }>()
     for (const uri of uris) {
       const parent = fileForUri(uri).getParent()
-      if (!parent) { this.navigate(fileForUri(uri)); continue }
+      if (!parent) {
+        this.navigate(fileForUri(uri))
+        continue
+      }
       const key = parent.getUri()
       const g = groups.get(key) ?? { parent, children: [] }
       g.children.push(uri)
@@ -699,15 +853,20 @@ export class AppWindow {
   openPath(text: string): void {
     text = text.trim()
     if (!text) return
-    if (text.startsWith('!')) { this._runCommand(text); return }
+    if (text.startsWith('!')) {
+      this._runCommand(text)
+      return
+    }
     let file: GFile
     if (text.startsWith('~')) file = fileForPath(HOME + text.slice(1))
     else if (/^[a-z]+:\/\//i.test(text)) file = fileForUri(text)
     else if (text.startsWith('/')) file = fileForPath(text)
     else file = this.activeTab!.location.getChild(text)
 
-    if (file.queryExists(null)) { this.toolbar.showStack('pathbar'); this.navigate(file) }
-    else this.toast('Location not found')
+    if (file.queryExists(null)) {
+      this.toolbar.showStack('pathbar')
+      this.navigate(file)
+    } else this.toast('Location not found')
   }
 
   /* `!command` in the location entry runs it in the current directory with
@@ -720,7 +879,10 @@ export class AppWindow {
     const command = text.slice(terminal ? 2 : 1).trim()
     const tab = this.activeTab
     const cwd = tab && tab.location.getPath()
-    if (!cwd) { this.toast('Not a local folder'); return }
+    if (!cwd) {
+      this.toast('Not a local folder')
+      return
+    }
     this.toolbar.showStack('pathbar')
     tab.view.focusView()
     if (terminal) {
@@ -734,7 +896,7 @@ export class AppWindow {
   _onTabSwitched(): void {
     const page = this.tabView.getSelectedPage()
     if (!page) return
-    const tab = this.tabs.find(t => t.page === page)
+    const tab = this.tabs.find((t) => t.page === page)
     if (!tab) return
     this._activeTab = tab
     if (this.searching) this._setSearch(false)
@@ -744,18 +906,26 @@ export class AppWindow {
   }
 
   _onClosePage(page: any): boolean {
-    const tab = this.tabs.find(t => t.page === page)
-    if (tab) { tab.destroy(); this.tabs = this.tabs.filter(t => t !== tab) }
+    const tab = this.tabs.find((t) => t.page === page)
+    if (tab) {
+      tab.destroy()
+      this.tabs = this.tabs.filter((t) => t !== tab)
+    }
     this.tabView.closePageFinish(page, true)
     /* close-page can also fire from AdwTabView itself (e.g. a tab drag gone
      * wrong), not just Ctrl+W — log who's left so an unexpected close of the
      * last page is traceable. */
     debugLog('close-page', `pages=${this.tabView.getNPages()}`)
-    if (this.tabView.getNPages() === 0) { debugLog('last-tab-closed', 'closing window'); this.window.close() }
+    if (this.tabView.getNPages() === 0) {
+      debugLog('last-tab-closed', 'closing window')
+      this.window.close()
+    }
     return true
   }
 
-  onTabChanged(tab: Tab): void { if (tab === this._activeTab) this.refreshChrome(tab) }
+  onTabChanged(tab: Tab): void {
+    if (tab === this._activeTab) this.refreshChrome(tab)
+  }
 
   /* Toggle Quick Look for the active pane: page through the entries the view is
    * showing, starting at the selection; keep the view's selection in sync. */
@@ -764,7 +934,7 @@ export class AppWindow {
     const entries = view.entries()
     if (!entries.length) return
     if (!this._quicklook) this._quicklook = new QuickLook(this.window)
-    this._quicklook.toggle(entries, view.selectedIndex(), i => view.selectIndex(i))
+    this._quicklook.toggle(entries, view.selectedIndex(), (i) => view.selectIndex(i))
   }
 
   refreshChrome(tab: Tab): void {
@@ -786,12 +956,21 @@ export class AppWindow {
 
   /* ---- Activation + context menu ---- */
   onItemActivated(tab: Tab, info: GFileInfo, file: GFile): void {
-    if (isDirectory(info)) { tab.navigate(file); return }
+    if (isDirectory(info)) {
+      tab.navigate(file)
+      return
+    }
     /* Browse archives in place as a virtual folder (gvfs archive://), reusing
      * the normal view — no extraction. "Open With…" still launches a manager. */
-    if (isArchive(displayName(info))) { tab.navigate(archiveRootFile(file)); return }
-    try { Gio.AppInfo.launchDefaultForUri(file.getUri(), null) }
-    catch { this.toast(`Could not open “${displayName(info)}”`) }
+    if (isArchive(displayName(info))) {
+      tab.navigate(archiveRootFile(file))
+      return
+    }
+    try {
+      Gio.AppInfo.launchDefaultForUri(file.getUri(), null)
+    } catch {
+      this.toast(`Could not open “${displayName(info)}”`)
+    }
   }
 
   showContextMenu(tab: Tab, widget: any, x: number, y: number, target: Entry | null): void {
@@ -801,30 +980,64 @@ export class AppWindow {
      * real folders outside the Trash can be bookmarked. */
     const bmFile = target && isDirectory(target.info) && !inTrash ? target.file : null
     this._ctxFile = bmFile
-    const bookmark: 'add' | 'remove' | null = bmFile && bmFile.getUri().startsWith('file://')
-      ? (isBookmarked(bmFile) ? 'remove' : 'add') : null
+    const bookmark: 'add' | 'remove' | null =
+      bmFile && bmFile.getUri().startsWith('file://')
+        ? isBookmarked(bmFile)
+          ? 'remove'
+          : 'add'
+        : null
     /* Tags apply to the selection; only real (file://) items can carry them. */
     const sel = this._selected()
-    const taggable = tagsService.enabled && !!target && !inTrash
-      && sel.length > 0 && sel.every(s => s.file.getUri().startsWith('file://'))
+    const taggable =
+      tagsService.enabled &&
+      !!target &&
+      !inTrash &&
+      sel.length > 0 &&
+      sel.every((s) => s.file.getUri().startsWith('file://'))
     let tags: TagMenuContext | null = null
     let customs: Array<{ id: string; build: (pop: any) => any }> | null = null
     if (taggable) {
-      const files = sel.map(s => s.file)
-      const assigned = sel.some(s => tagsService.tagsOf(s.file.getUri()).length > 0)
+      const files = sel.map((s) => s.file)
+      const assigned = sel.some((s) => tagsService.tagsOf(s.file.getUri()).length > 0)
       if (customMenuSupported()) {
-        tags = { custom: true, overflow: tagsService.visibleTags().length > TAG_DOTS_FIT, assigned, items: [] }
+        tags = {
+          custom: true,
+          overflow: tagsService.visibleTags().length > TAG_DOTS_FIT,
+          assigned,
+          items: [],
+        }
         const onToggle = (name: string): void => this._toggleTag(files, name)
-        customs = [{ id: 'tag-dots', build: (pop: any) => buildTagDotsRow(files, onToggle, () => { pop.popdown(); this._activate('tag-new') }) }]
-        if (tags.overflow) customs.push({ id: 'tag-list', build: () => buildTagListRows(files, onToggle) })
+        customs = [
+          {
+            id: 'tag-dots',
+            build: (pop: any) =>
+              buildTagDotsRow(files, onToggle, () => {
+                pop.popdown()
+                this._activate('tag-new')
+              }),
+          },
+        ]
+        if (tags.overflow)
+          customs.push({ id: 'tag-list', build: () => buildTagListRows(files, onToggle) })
       } else {
         tags = { custom: false, overflow: false, assigned, items: this._buildTagActions(files) }
       }
     }
-    this._popupMenu(buildContextMenu({
-      target, inTrash, clipboardEmpty: this.clipboard.isEmpty, isSplit: tab.isSplit, bookmark, tags,
-      canShowInFolder: this._canShowInFolder(tab, sel),
-    }), widget, x, y, customs)
+    this._popupMenu(
+      buildContextMenu({
+        target,
+        inTrash,
+        clipboardEmpty: this.clipboard.isEmpty,
+        isSplit: tab.isSplit,
+        bookmark,
+        tags,
+        canShowInFolder: this._canShowInFolder(tab, sel),
+      }),
+      widget,
+      x,
+      y,
+      customs,
+    )
   }
 
   /* Context menu for a drive/partition row in the Computer view. Its actions
@@ -858,18 +1071,31 @@ export class AppWindow {
     this._popupMenu(menu, widget, x, y)
   }
 
-  _popupMenu(menu: any, widget: any, x: number, y: number, customs: Array<{ id: string; build: (pop: any) => any }> | null = null): void {
+  _popupMenu(
+    menu: any,
+    widget: any,
+    x: number,
+    y: number,
+    customs: Array<{ id: string; build: (pop: any) => any }> | null = null,
+  ): void {
     const pop = Gtk.PopoverMenu.newFromModel(menu)
     pop.setParent(widget)
     pop.setHasArrow(false)
     /* Fill the model's custom-widget placeholders (the tags dot row / list).
      * Ids without a matching placeholder are simply skipped by addChild. */
     for (const c of customs ?? []) {
-      try { pop.addChild(c.build(pop), c.id) } catch { /* menu still usable without the widget */ }
+      try {
+        pop.addChild(c.build(pop), c.id)
+      } catch {
+        /* menu still usable without the widget */
+      }
     }
     try {
       const r = new Gdk.Rectangle()
-      r.x = Math.round(x); r.y = Math.round(y); r.width = 1; r.height = 1
+      r.x = Math.round(x)
+      r.y = Math.round(y)
+      r.width = 1
+      r.height = 1
       pop.setPointingTo(r)
     } catch {}
     this._ctxPopover = pop
@@ -878,15 +1104,27 @@ export class AppWindow {
      * and the action would never fire. */
     pop.on('closed', () => {
       this._ctxPopover = null
-      if (this._pendingTagsChanged) { this._pendingTagsChanged = false; this._applyTagsChanged() }
-      GLib.timeoutAdd(GLib.PRIORITY_DEFAULT_IDLE, 100, () => { try { pop.unparent() } catch {} return false })
+      if (this._pendingTagsChanged) {
+        this._pendingTagsChanged = false
+        this._applyTagsChanged()
+      }
+      GLib.timeoutAdd(GLib.PRIORITY_DEFAULT_IDLE, 100, () => {
+        try {
+          pop.unparent()
+        } catch {}
+        return false
+      })
     })
     pop.popup()
   }
 
   /* ---- Operations ---- */
-  _selected(): Entry[] { return this.activeTab ? this.activeTab.view.getSelected() : [] }
-  _selectedFiles(): GFile[] { return this._selected().map(s => s.file) }
+  _selected(): Entry[] {
+    return this.activeTab ? this.activeTab.view.getSelected() : []
+  }
+  _selectedFiles(): GFile[] {
+    return this._selected().map((s) => s.file)
+  }
 
   /* The file an entry really points at: Recent (and similar backends) list
    * proxy URIs carrying the real location in standard::target-uri. */
@@ -903,7 +1141,7 @@ export class AppWindow {
     if (!loc || !sel.length || this._inTrash(loc)) return false
     if (tab.isShowingSearch) return true
     const locUri = loc.getUri()
-    return sel.some(s => {
+    return sel.some((s) => {
       const p = this._realFile(s).getParent()
       return !!p && p.getUri() !== locUri
     })
@@ -913,22 +1151,28 @@ export class AppWindow {
    * same path org.freedesktop.FileManager1 "Show in folder" uses. */
   _showInFolder(): void {
     const uris = this._selected()
-      .map(s => this._realFile(s))
-      .filter(f => !!f.getParent())
-      .map(f => f.getUri())
+      .map((s) => this._realFile(s))
+      .filter((f) => !!f.getParent())
+      .map((f) => f.getUri())
     if (uris.length) this.revealItems(uris)
   }
 
   async _newFolder(): Promise<void> {
     if (!this.activeTab) return
-    const name = await promptText(this.window, { heading: 'New Folder', value: 'New Folder', okLabel: 'Create', selectBasename: true })
+    const name = await promptText(this.window, {
+      heading: 'New Folder',
+      value: 'New Folder',
+      okLabel: 'Create',
+      selectBasename: true,
+    })
     if (!name) return
     const dir = this.activeTab.location
     const folder = this.fileOps.newFolder(dir, name)
     this.undo.push({
       undo: () => this.fileOps.trash([folder]),
       redo: () => this.fileOps.newFolder(dir, name),
-      undoLabel: 'Undo Create Folder', redoLabel: 'Redo Create Folder',
+      undoLabel: 'Undo Create Folder',
+      redoLabel: 'Redo Create Folder',
     })
     this.toast(`Created “${name}”`)
   }
@@ -938,11 +1182,12 @@ export class AppWindow {
     if (!files.length || !this.activeTab) return
     const dest = this.activeTab.location
     if (!this.fileOps.link(files, dest)) return
-    const links = files.map(f => dest.getChild(f.getBasename()))
+    const links = files.map((f) => dest.getChild(f.getBasename()))
     this.undo.push({
       undo: () => this.fileOps.trash(links),
       redo: () => this.fileOps.link(files, dest),
-      undoLabel: 'Undo Create Link', redoLabel: 'Redo Create Link',
+      undoLabel: 'Undo Create Link',
+      redoLabel: 'Redo Create Link',
     })
     this.toast(files.length > 1 ? 'Links created' : 'Link created')
   }
@@ -952,9 +1197,18 @@ export class AppWindow {
    * (Recent, Trash, Computer) already have their own permanent sidebar entries. */
   _addBookmark(file: GFile | null): void {
     if (!file) return
-    if (!file.getUri().startsWith('file://')) { this.toast('Only folders can be bookmarked'); return }
-    if (isBookmarked(file)) { this.toast(`“${locationName(file)}” is already bookmarked`); return }
-    if (!addBookmark(file)) { this.toast('Could not save bookmark'); return }
+    if (!file.getUri().startsWith('file://')) {
+      this.toast('Only folders can be bookmarked')
+      return
+    }
+    if (isBookmarked(file)) {
+      this.toast(`“${locationName(file)}” is already bookmarked`)
+      return
+    }
+    if (!addBookmark(file)) {
+      this.toast('Could not save bookmark')
+      return
+    }
     this.sidebar.refresh()
     this.sidebar.setActive(this.activeTab?.location ?? file)
     this.toast(`Bookmarked “${locationName(file)}”`)
@@ -975,12 +1229,15 @@ export class AppWindow {
     const pattern = await promptText(this.window, {
       heading: 'Select Items Matching',
       body: 'Use * and ? as wildcards (e.g. “*.png”).',
-      placeholder: 'Pattern', okLabel: 'Select',
+      placeholder: 'Pattern',
+      okLabel: 'Select',
     })
     if (!pattern) return
     const count = view.selectPattern(pattern)
     view.focusView()
-    this.toast(count > 0 ? `Selected ${count} item${count === 1 ? '' : 's'}` : 'No items match the pattern')
+    this.toast(
+      count > 0 ? `Selected ${count} item${count === 1 ? '' : 's'}` : 'No items match the pattern',
+    )
   }
 
   _openSelection(): void {
@@ -1007,14 +1264,20 @@ export class AppWindow {
       settings.setString('picture-uri', uri)
       settings.setString('picture-uri-dark', uri)
       this.toast('Wallpaper set')
-    } catch { this.toast('Could not set wallpaper') }
+    } catch {
+      this.toast('Could not set wallpaper')
+    }
   }
 
   _clip(cut: boolean): void {
     const files = this._selectedFiles()
     if (!files.length) return
     this.clipboard.set(files, cut)
-    try { this.window.getClipboard().setContent(fileClipboardProvider(files, cut)) } catch { /* system clipboard best-effort */ }
+    try {
+      this.window.getClipboard().setContent(fileClipboardProvider(files, cut))
+    } catch {
+      /* system clipboard best-effort */
+    }
     this.toast(`${files.length} item${files.length > 1 ? 's' : ''} ${cut ? 'cut' : 'copied'}`)
   }
 
@@ -1025,12 +1288,21 @@ export class AppWindow {
       const cb = this.window.getClipboard()
       cb.readTextAsync(null, (...a: any[]) => {
         let text
-        try { text = cb.readTextFinish(a[1]) } catch { return }
+        try {
+          text = cb.readTextFinish(a[1])
+        } catch {
+          return
+        }
         if (Array.isArray(text)) text = text[0]
-        const files = String(text || '').split(/\r?\n/).filter(u => u.startsWith('file://')).map(u => fileForUri(u))
+        const files = String(text || '')
+          .split(/\r?\n/)
+          .filter((u) => u.startsWith('file://'))
+          .map((u) => fileForUri(u))
         if (files.length) this.fileOps.copy(files, dest)
       })
-    } catch { /* no system clipboard */ }
+    } catch {
+      /* no system clipboard */
+    }
   }
 
   /* Files dropped into a view. Dropping onto a folder cell (targetDir) moves
@@ -1039,7 +1311,10 @@ export class AppWindow {
   async onDropFiles(tab: Tab, files: GFile[], targetDir?: GFile): Promise<void> {
     const dest = targetDir ?? tab.location
     const destUri = dest.getUri()
-    const incoming = files.filter(f => { const p = f.getParent(); return !p || p.getUri() !== destUri })
+    const incoming = files.filter((f) => {
+      const p = f.getParent()
+      return !p || p.getUri() !== destUri
+    })
     if (!incoming.length) return
     const plan = await this._resolvePlan(incoming, dest, !!targetDir)
     if (!plan || !plan.items.length) return
@@ -1047,19 +1322,29 @@ export class AppWindow {
       const origParent = incoming[0].getParent()
       let dests = this.fileOps.moveItems(plan.items, plan.prune)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else if (origParent) this.undo.push({
-        undo: () => { dests = this.fileOps.move(dests, origParent) },
-        redo: () => { dests = this.fileOps.moveItems(plan.items, plan.prune) },
-        undoLabel: 'Undo Move', redoLabel: 'Redo Move',
-      })
+      else if (origParent)
+        this.undo.push({
+          undo: () => {
+            dests = this.fileOps.move(dests, origParent)
+          },
+          redo: () => {
+            dests = this.fileOps.moveItems(plan.items, plan.prune)
+          },
+          undoLabel: 'Undo Move',
+          redoLabel: 'Redo Move',
+        })
     } else {
       let dests = this.fileOps.copyItems(plan.items)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else this.undo.push({
-        undo: () => this.fileOps.trash(dests),
-        redo: () => { dests = this.fileOps.copyItems(plan.items) },
-        undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
-      })
+      else
+        this.undo.push({
+          undo: () => this.fileOps.trash(dests),
+          redo: () => {
+            dests = this.fileOps.copyItems(plan.items)
+          },
+          undoLabel: 'Undo Copy',
+          redoLabel: 'Redo Copy',
+        })
     }
   }
 
@@ -1067,14 +1352,21 @@ export class AppWindow {
    * prompting for name collisions and recursively merging directory-on-directory
    * conflicts. Returns null if the user cancels, else { items, prune, merged } —
    * see planTransfer. `move` distinguishes cut/move from copy. */
-  _resolvePlan(files: GFile[], destDir: GFile, move = false): Promise<{ items: CopyItem[]; prune: GFile[]; merged: boolean } | null> {
+  _resolvePlan(
+    files: GFile[],
+    destDir: GFile,
+    move = false,
+  ): Promise<{ items: CopyItem[]; prune: GFile[]; merged: boolean } | null> {
     return planTransfer(this.window, files, destDir, move)
   }
 
   async _paste(): Promise<void> {
     const dest = this._pasteTarget || this.activeTab?.location
     if (!dest) return
-    if (this.clipboard.isEmpty) { this._pasteFromSystem(dest); return }
+    if (this.clipboard.isEmpty) {
+      this._pasteFromSystem(dest)
+      return
+    }
     const files = this.clipboard.files.slice()
     const cut = this.clipboard.cut
     const plan = await this._resolvePlan(files, dest, cut)
@@ -1084,19 +1376,29 @@ export class AppWindow {
       let dests = this.fileOps.moveItems(plan.items, plan.prune)
       this.clipboard.clear()
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else if (origParent) this.undo.push({
-        undo: () => { dests = this.fileOps.move(dests, origParent) },
-        redo: () => { dests = this.fileOps.move(dests, dest) },
-        undoLabel: 'Undo Move', redoLabel: 'Redo Move',
-      })
+      else if (origParent)
+        this.undo.push({
+          undo: () => {
+            dests = this.fileOps.move(dests, origParent)
+          },
+          redo: () => {
+            dests = this.fileOps.move(dests, dest)
+          },
+          undoLabel: 'Undo Move',
+          redoLabel: 'Redo Move',
+        })
     } else {
       let dests = this.fileOps.copyItems(plan.items)
       if (plan.merged) this.toast('Merged folders can’t be undone')
-      else this.undo.push({
-        undo: () => this.fileOps.trash(dests),
-        redo: () => { dests = this.fileOps.copyItems(plan.items) },
-        undoLabel: 'Undo Copy', redoLabel: 'Redo Copy',
-      })
+      else
+        this.undo.push({
+          undo: () => this.fileOps.trash(dests),
+          redo: () => {
+            dests = this.fileOps.copyItems(plan.items)
+          },
+          undoLabel: 'Undo Copy',
+          redoLabel: 'Redo Copy',
+        })
     }
   }
 
@@ -1111,13 +1413,22 @@ export class AppWindow {
     const plan = await batchRenameDialog(this.window, sel)
     if (!plan || !plan.length) return
     const items = plan
-      .map(p => ({ from: p.from, to: p.to, cur: this.fileOps.rename(p.file, p.to) }))
-      .filter(x => x.cur)
+      .map((p) => ({ from: p.from, to: p.to, cur: this.fileOps.rename(p.file, p.to) }))
+      .filter((x) => x.cur)
     if (!items.length) return
     this.undo.push({
-      undo: () => items.forEach(x => { const b = this.fileOps.rename(x.cur, x.from); if (b) x.cur = b }),
-      redo: () => items.forEach(x => { const f = this.fileOps.rename(x.cur, x.to); if (f) x.cur = f }),
-      undoLabel: 'Undo Rename', redoLabel: 'Redo Rename',
+      undo: () =>
+        items.forEach((x) => {
+          const b = this.fileOps.rename(x.cur, x.from)
+          if (b) x.cur = b
+        }),
+      redo: () =>
+        items.forEach((x) => {
+          const f = this.fileOps.rename(x.cur, x.to)
+          if (f) x.cur = f
+        }),
+      undoLabel: 'Undo Rename',
+      redoLabel: 'Redo Rename',
     })
     this.toast(`Renamed ${items.length} file${items.length > 1 ? 's' : ''}`)
   }
@@ -1126,14 +1437,26 @@ export class AppWindow {
     const sel = this._selected()
     if (sel.length !== 1) return
     const oldName = displayName(sel[0].info)
-    const newName = await promptText(this.window, { heading: 'Rename', value: oldName, okLabel: 'Rename', selectBasename: true })
+    const newName = await promptText(this.window, {
+      heading: 'Rename',
+      value: oldName,
+      okLabel: 'Rename',
+      selectBasename: true,
+    })
     if (!newName || newName === oldName) return
     let cur = this.fileOps.rename(sel[0].file, newName)
     if (!cur) return
     this.undo.push({
-      undo: () => { const back = this.fileOps.rename(cur, oldName); if (back) cur = back },
-      redo: () => { const fwd = this.fileOps.rename(cur, newName); if (fwd) cur = fwd },
-      undoLabel: 'Undo Rename', redoLabel: 'Redo Rename',
+      undo: () => {
+        const back = this.fileOps.rename(cur, oldName)
+        if (back) cur = back
+      },
+      redo: () => {
+        const fwd = this.fileOps.rename(cur, newName)
+        if (fwd) cur = fwd
+      },
+      undoLabel: 'Undo Rename',
+      redoLabel: 'Redo Rename',
     })
     this.toast(`Renamed to “${newName}”`)
   }
@@ -1144,7 +1467,8 @@ export class AppWindow {
     this.undo.push({
       undo: () => this.fileOps.restoreFromTrash(files),
       redo: () => this.fileOps.trash(files),
-      undoLabel: 'Undo Move to Trash', redoLabel: 'Redo Move to Trash',
+      undoLabel: 'Undo Move to Trash',
+      redoLabel: 'Redo Move to Trash',
     })
     const n = files.length
     this.toast(`Moved ${n} item${n > 1 ? 's' : ''} to Trash`, { label: 'Undo', name: 'win.undo' })
@@ -1155,7 +1479,8 @@ export class AppWindow {
     if (!files.length) return
     const ok = await confirm(this.window, {
       heading: `Permanently delete ${files.length} item${files.length > 1 ? 's' : ''}?`,
-      body: 'This action cannot be undone.', okLabel: 'Delete',
+      body: 'This action cannot be undone.',
+      okLabel: 'Delete',
     })
     if (ok) this.fileOps.deletePermanently(files)
   }
@@ -1191,8 +1516,8 @@ export class AppWindow {
 
   _restore(): void {
     const pairs = this._selected()
-      .map(s => [s.file, s.info.getAttributeByteString('trash::orig-path')] as [GFile, string])
-      .filter(p => !!p[1])
+      .map((s) => [s.file, s.info.getAttributeByteString('trash::orig-path')] as [GFile, string])
+      .filter((p) => !!p[1])
     if (pairs.length) this.fileOps.restore(pairs)
   }
 
@@ -1204,14 +1529,18 @@ export class AppWindow {
     if (!sel.length) return
     const dir = await chooseFolder(this.window, { title: 'Restore to Folder' })
     if (!dir) return
-    const items = sel.map(s => ({ file: s.file, name: displayName(s.info) }))
+    const items = sel.map((s) => ({ file: s.file, name: displayName(s.info) }))
     if (this.fileOps.restoreTo(items, dir))
-      this.toast(`Restored ${items.length} item${items.length > 1 ? 's' : ''} to “${locationName(dir)}”`)
+      this.toast(
+        `Restored ${items.length} item${items.length > 1 ? 's' : ''} to “${locationName(dir)}”`,
+      )
   }
 
   async _emptyTrash(): Promise<void> {
     const ok = await confirm(this.window, {
-      heading: 'Empty all items from Trash?', body: 'All items will be permanently deleted.', okLabel: 'Empty Trash',
+      heading: 'Empty all items from Trash?',
+      body: 'All items will be permanently deleted.',
+      okLabel: 'Empty Trash',
     })
     if (ok) this.fileOps.emptyTrash()
   }
@@ -1228,7 +1557,9 @@ export class AppWindow {
     this.toolbar.locationEntry.selectRegion(0, -1)
   }
 
-  _toggleSearch(): void { this._setSearch(!this.searching) }
+  _toggleSearch(): void {
+    this._setSearch(!this.searching)
+  }
 
   _setSearch(on: boolean): void {
     this.searching = on
@@ -1245,8 +1576,11 @@ export class AppWindow {
   }
 
   toast(text: string, action?: { label: string; name: string }): void {
-    const t = new Adw.Toast({ title: text })
-    if (action) { t.setButtonLabel(action.label); t.setActionName(action.name) }
+    const t = new Adw.Toast({ title: text, useMarkup: false })
+    if (action) {
+      t.setButtonLabel(action.label)
+      t.setActionName(action.name)
+    }
     this.toastOverlay.addToast(t)
   }
 }

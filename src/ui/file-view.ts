@@ -1,21 +1,30 @@
-import Gtk from 'gi:Gtk-4.0'
 import Adw from 'gi:Adw-1'
-import Gio from 'gi:Gio-2.0'
-import Gdk from 'gi:Gdk-4.0'
 import GLib from 'gi:GLib-2.0'
-import { FILE_INFO_TYPE, uriOf } from '../core/gio.ts'
-import { displayName, isDirectory, formatBytes } from '../core/format.ts'
+import Gdk from 'gi:Gdk-4.0'
+import Gio from 'gi:Gio-2.0'
+import Gtk from 'gi:Gtk-4.0'
+import { COLUMN_DEF, TRASH_COLUMN, defaultColumnConfig } from '../core/columns.ts'
 import { makeComparator, sortCache } from '../core/comparator.ts'
 import type { Comparator } from '../core/comparator.ts'
-import { gridFactory, nameColumn, nameCellFactory, metaColumn, metaFactory } from './cells.ts'
-import { tagsService } from '../services/tags-service.ts'
-import type { CellContext } from './cells.ts'
+import { displayName, formatBytes, isDirectory } from '../core/format.ts'
 import { fuzzyMatch } from '../core/fuzzy-match.ts'
-import { COLUMN_DEF, TRASH_COLUMN, defaultColumnConfig } from '../core/columns.ts'
-import { FloatingBar } from './floating-bar.ts'
+import { FILE_INFO_TYPE, uriOf } from '../core/gio.ts'
 import { globMatcher } from '../core/glob.ts'
+import { escapeMarkup } from '../core/markup.ts'
+import type {
+  ColumnConfig,
+  EmptyKind,
+  Entry,
+  GFile,
+  GFileInfo,
+  ViewConfig,
+  ViewMode,
+} from '../core/types.ts'
+import { tagsService } from '../services/tags-service.ts'
+import { gridFactory, metaColumn, metaFactory, nameCellFactory, nameColumn } from './cells.ts'
+import type { CellContext } from './cells.ts'
 import { makeDragSource, makeDropTarget } from './dnd.ts'
-import type { ColumnConfig, Entry, GFile, GFileInfo, ViewConfig, ViewMode, EmptyKind } from '../core/types.ts'
+import { FloatingBar } from './floating-bar.ts'
 
 type ActivateHandler = (info: GFileInfo, file: GFile) => void
 type ContextMenuHandler = (widget: any, x: number, y: number, target: Entry | null) => void
@@ -40,8 +49,11 @@ const INSERT_COALESCE_MS = 80
 const STREAM_ROWS_MAX = 1000
 
 /* Chord modifiers we discriminate on (lock/scroll bits are ignored). */
-const MODIFIER_MASK = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK
-  | Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.SUPER_MASK
+const MODIFIER_MASK =
+  Gdk.ModifierType.CONTROL_MASK |
+  Gdk.ModifierType.ALT_MASK |
+  Gdk.ModifierType.SHIFT_MASK |
+  Gdk.ModifierType.SUPER_MASK
 
 /* Alt + h/j/k/l → arrow-key directions for cursor movement (vim-inspired). */
 const VIM_DIRS: Record<number, 'left' | 'down' | 'up' | 'right'> = {
@@ -55,14 +67,23 @@ const VIM_DIRS: Record<number, 'left' | 'down' | 'up' | 'right'> = {
  * hold Shift before a capital, Alt/Ctrl before a chord. Every other
  * non-printable key does cancel it. */
 const MODIFIER_KEYS = new Set<number>([
-  Gdk.KEY_Shift_L, Gdk.KEY_Shift_R,
-  Gdk.KEY_Control_L, Gdk.KEY_Control_R,
-  Gdk.KEY_Alt_L, Gdk.KEY_Alt_R,
-  Gdk.KEY_Meta_L, Gdk.KEY_Meta_R,
-  Gdk.KEY_Super_L, Gdk.KEY_Super_R,
-  Gdk.KEY_Hyper_L, Gdk.KEY_Hyper_R,
-  Gdk.KEY_Caps_Lock, Gdk.KEY_Shift_Lock, Gdk.KEY_Num_Lock,
-  Gdk.KEY_ISO_Level3_Shift, Gdk.KEY_ISO_Level5_Shift,
+  Gdk.KEY_Shift_L,
+  Gdk.KEY_Shift_R,
+  Gdk.KEY_Control_L,
+  Gdk.KEY_Control_R,
+  Gdk.KEY_Alt_L,
+  Gdk.KEY_Alt_R,
+  Gdk.KEY_Meta_L,
+  Gdk.KEY_Meta_R,
+  Gdk.KEY_Super_L,
+  Gdk.KEY_Super_R,
+  Gdk.KEY_Hyper_L,
+  Gdk.KEY_Hyper_R,
+  Gdk.KEY_Caps_Lock,
+  Gdk.KEY_Shift_Lock,
+  Gdk.KEY_Num_Lock,
+  Gdk.KEY_ISO_Level3_Shift,
+  Gdk.KEY_ISO_Level5_Shift,
 ])
 
 /* Presents a stream of {info, file} entries as a grid or list, with explicit
@@ -132,10 +153,21 @@ export class FileView {
 
     const ctx = this._cellContext()
 
-    this.gridView = new Gtk.GridView({ model: this.selection, factory: gridFactory(ctx), minColumns: 1, maxColumns: 24, vexpand: true, enableRubberband: true })
+    this.gridView = new Gtk.GridView({
+      model: this.selection,
+      factory: gridFactory(ctx),
+      minColumns: 1,
+      maxColumns: 24,
+      vexpand: true,
+      enableRubberband: true,
+    })
     this.gridView.on('activate', (...a: any[]) => this._activate(a[a.length - 1]))
 
-    this.columnView = new Gtk.ColumnView({ model: this.selection, vexpand: true, enableRubberband: true })
+    this.columnView = new Gtk.ColumnView({
+      model: this.selection,
+      vexpand: true,
+      enableRubberband: true,
+    })
     this.columnView.addCssClass('rich-list')
     this.nameCol = nameColumn(ctx)
     this.columnView.appendColumn(this.nameCol)
@@ -158,13 +190,26 @@ export class FileView {
     this._installTypeahead(this.gridView)
     this._installTypeahead(this.columnView)
 
-    this._errorPage = new Adw.StatusPage({ iconName: 'dialog-error-symbolic', title: 'Unable to Load Location' })
+    this._errorPage = new Adw.StatusPage({
+      iconName: 'dialog-error-symbolic',
+      title: 'Unable to Load Location',
+    })
 
     this.stack = new Gtk.Stack({ transitionType: Gtk.StackTransitionType.CROSSFADE })
     this.stack.addNamed(this.viewStack, 'results')
     this.stack.addNamed(loadingPage(), 'loading')
-    this.stack.addNamed(new Adw.StatusPage({ iconName: 'folder-symbolic', title: 'Folder is Empty' }), 'empty-folder')
-    this.stack.addNamed(new Adw.StatusPage({ iconName: 'system-search-symbolic', title: 'No Results Found', description: 'Try a different search term.' }), 'empty-search')
+    this.stack.addNamed(
+      new Adw.StatusPage({ iconName: 'folder-symbolic', title: 'Folder is Empty' }),
+      'empty-folder',
+    )
+    this.stack.addNamed(
+      new Adw.StatusPage({
+        iconName: 'system-search-symbolic',
+        title: 'No Results Found',
+        description: 'Try a different search term.',
+      }),
+      'empty-search',
+    )
     this.stack.addNamed(this._errorPage, 'error')
 
     /* Overlay hosts the floating bar, pinned bottom-right like nautilus's
@@ -177,7 +222,7 @@ export class FileView {
     this.overlay.addOverlay(this.floatingBar.widget)
 
     /* Accept files dropped from other apps (or this one) into the current view. */
-    this.overlay.addController(makeDropTarget(files => this.onDropFiles(files)))
+    this.overlay.addController(makeDropTarget((files) => this.onDropFiles(files)))
 
     /* Report focus entering this view's subtree, so a dual-pane container can
      * mark this pane active. */
@@ -192,7 +237,9 @@ export class FileView {
     this.store.on('items-changed', () => this._scheduleStatus())
   }
 
-  get widget(): any { return this.overlay }
+  get widget(): any {
+    return this.overlay
+  }
 
   configure({ sortKey, sortDesc, filter }: ViewConfig): void {
     this.cmp = makeComparator(sortKey, sortDesc)
@@ -212,10 +259,15 @@ export class FileView {
      * scroll offset; a navigation pins to the top. */
     this._restoreScroll = this._pinTop ? -1 : this._currentScroll()
     this._loading = true
-    this._clearQueue()   /* inserts still buffered from an interrupted load are obsolete */
-    this._storeResetPending = false   /* an interrupted navigation's pending swap is moot */
-    if (this._pinTop) { this._merge = false; this._pendingReset = true }
-    else { this._pendingReset = false; this._beginMerge() }
+    this._clearQueue() /* inserts still buffered from an interrupted load are obsolete */
+    this._storeResetPending = false /* an interrupted navigation's pending swap is moot */
+    if (this._pinTop) {
+      this._merge = false
+      this._pendingReset = true
+    } else {
+      this._pendingReset = false
+      this._beginMerge()
+    }
     this._armSpinner()
   }
 
@@ -238,24 +290,29 @@ export class FileView {
   /* Snapshot the keys currently in the store; incoming items are then merged
    * against it (mark-and-sweep) instead of clearing and repopulating. */
   _beginMerge(): void {
+    const storeKeys = new Set<string>()
+    for (const info of this.rows) storeKeys.add(info._key)
     this._merge = true
     this._seen = new Set()
-    this._storeKeys = new Set()
+    this._storeKeys = storeKeys
     this._incoming = []
-    for (const info of this.rows) this._storeKeys!.add(info._key)
   }
 
   _mergeEntries(pairs: Entry[]): void {
+    const seen = this._seen
+    const storeKeys = this._storeKeys
+    const incoming = this._incoming
+    if (!seen || !storeKeys || !incoming) throw new Error('_mergeEntries called outside a merge')
     const toInsert: GFileInfo[] = []
     for (const { info, file } of pairs) {
       this._stamp(info, file)
-      this._incoming!.push({ info, file })
+      incoming.push({ info, file })
       if (!this.filter(info)) continue
-      this._seen!.add(info._key)
+      seen.add(info._key)
       /* Already displayed → keep its widget (and selection); don't re-insert. */
-      if (this._storeKeys!.has(info._key)) continue
+      if (storeKeys.has(info._key)) continue
       toInsert.push(info)
-      this._storeKeys!.add(info._key)
+      storeKeys.add(info._key)
     }
     this._queueInsert(toInsert)
   }
@@ -263,8 +320,11 @@ export class FileView {
   /* Sweep: drop the rows that weren't in the new result set, adopt the new full
    * dataset, and end the merge. */
   _endMerge(): void {
-    this._removeWhere(info => !this._seen!.has(info._key))
-    this.all = this._incoming!
+    const seen = this._seen
+    const incoming = this._incoming
+    if (!seen || !incoming) throw new Error('_endMerge called outside a merge')
+    this._removeWhere((info) => !seen.has(info._key))
+    this.all = incoming
     this._merge = false
     this._seen = this._storeKeys = this._incoming = null
   }
@@ -278,7 +338,7 @@ export class FileView {
   narrowByName(query: string): void {
     if (!query) return
     const q = query.toLowerCase()
-    this._removeWhere(info => !displayName(info).toLowerCase().includes(q))
+    this._removeWhere((info) => !displayName(info).toLowerCase().includes(q))
   }
 
   /* Drop every shown row now. Used when the search mode flips (name ↔ content):
@@ -297,10 +357,13 @@ export class FileView {
   _removeWhere(shouldRemove: (info: any) => boolean): void {
     let i = this.rows.length - 1
     while (i >= 0) {
-      if (!shouldRemove(this.rows[i])) { i--; continue }
+      if (!shouldRemove(this.rows[i])) {
+        i--
+        continue
+      }
       const hi = i
       while (i >= 0 && shouldRemove(this.rows[i])) i--
-      this.store.splice(i + 1, hi - i, [])   // remove rows [i+1 .. hi]
+      this.store.splice(i + 1, hi - i, []) // remove rows [i+1 .. hi]
       this.rows.splice(i + 1, hi - i)
     }
   }
@@ -330,7 +393,10 @@ export class FileView {
   }
 
   _cancelSpinner(): void {
-    if (this._spinnerTimer) { GLib.sourceRemove(this._spinnerTimer); this._spinnerTimer = 0 }
+    if (this._spinnerTimer) {
+      GLib.sourceRemove(this._spinnerTimer)
+      this._spinnerTimer = 0
+    }
   }
 
   /* Stash the GFile and a stable identity key on the info wrapper (both survive
@@ -340,12 +406,15 @@ export class FileView {
   _stamp(info: GFileInfo, file: GFile): void {
     info._file = file
     info._key = uriOf(file)
-    sortCache(info)   /* pre-warm the comparison keys (see comparator.ts) */
+    sortCache(info) /* pre-warm the comparison keys (see comparator.ts) */
     tagsService.heal(info, file)
   }
 
   addEntries(pairs: Entry[]): void {
-    if (this._merge) { this._mergeEntries(pairs); return }
+    if (this._merge) {
+      this._mergeEntries(pairs)
+      return
+    }
     /* First batch of a navigation: start the retained dataset fresh NOW (before
      * pushing), and leave the displayed rows to be swapped at the flush. */
     if (this._pendingReset) {
@@ -368,7 +437,10 @@ export class FileView {
    * as the first insert so the swap is old → new with no blank in between. */
   _queueInsert(infos: GFileInfo[]): void {
     this._insertQueue.push(...infos)
-    if (this._storeResetPending || this.rows.length === 0) { this._flushInserts(); return }
+    if (this._storeResetPending || this.rows.length === 0) {
+      this._flushInserts()
+      return
+    }
     if (!this._insertQueue.length || this._flushTimer) return
     if (!this._merge && this._loading && this.rows.length >= STREAM_ROWS_MAX) return
     this._flushTimer = GLib.timeoutAdd(GLib.PRIORITY_DEFAULT, INSERT_COALESCE_MS, () => {
@@ -379,7 +451,10 @@ export class FileView {
   }
 
   _flushInserts(): void {
-    if (this._flushTimer) { GLib.sourceRemove(this._flushTimer); this._flushTimer = 0 }
+    if (this._flushTimer) {
+      GLib.sourceRemove(this._flushTimer)
+      this._flushTimer = 0
+    }
     this._resetIfPending()
     if (this._insertQueue.length) {
       const infos = this._insertQueue
@@ -394,7 +469,10 @@ export class FileView {
   }
 
   _clearQueue(): void {
-    if (this._flushTimer) { GLib.sourceRemove(this._flushTimer); this._flushTimer = 0 }
+    if (this._flushTimer) {
+      GLib.sourceRemove(this._flushTimer)
+      this._flushTimer = 0
+    }
     this._insertQueue = []
   }
 
@@ -414,7 +492,10 @@ export class FileView {
    * folder scrolled partway down instead of at its first item. */
   _applyPending(): void {
     if (this.stack.getVisibleChildName() !== 'results') return
-    if (this._wantFocus) { this._focusVisibleView(); this._wantFocus = false }
+    if (this._wantFocus) {
+      this._focusVisibleView()
+      this._wantFocus = false
+    }
     if (this._pinTop) this._pinToTop()
     else if (this._restoreScroll >= 0) this._scrollTo(this._restoreScroll)
     this._applyReveal()
@@ -427,7 +508,10 @@ export class FileView {
    * the revealed item instead. Cleared once the load settles (finishLoading). */
   setPendingReveal(uris: string[]): void {
     this._revealUris = uris.length ? new Set(uris) : null
-    if (this._revealUris) { this._pinTop = false; this._applyReveal() }
+    if (this._revealUris) {
+      this._pinTop = false
+      this._applyReveal()
+    }
   }
 
   /* Re-assert the reveal selection against the current store: select every row
@@ -455,12 +539,19 @@ export class FileView {
   }
 
   _scrollAdjustment(): any {
-    const sw = this.viewStack.getVisibleChildName() === 'list' ? this.listScroller : this.gridScroller
+    const sw =
+      this.viewStack.getVisibleChildName() === 'list' ? this.listScroller : this.gridScroller
     return sw?.getVadjustment?.()
   }
 
-  _scrollTop(): void { const adj = this._scrollAdjustment(); if (adj) adj.setValue(0) }
-  _currentScroll(): number { const adj = this._scrollAdjustment(); return adj ? adj.getValue() : 0 }
+  _scrollTop(): void {
+    const adj = this._scrollAdjustment()
+    if (adj) adj.setValue(0)
+  }
+  _currentScroll(): number {
+    const adj = this._scrollAdjustment()
+    return adj ? adj.getValue() : 0
+  }
 
   _scrollTo(value: number): void {
     const adj = this._scrollAdjustment()
@@ -470,7 +561,8 @@ export class FileView {
   /* GridView.scroll_to(pos, flags, scroll); ColumnView.scroll_to(pos, column,
    * flags, scroll) — different arities, so dispatch on the visible view. */
   _scrollItemIntoView(pos: number, flags: any): void {
-    if (this.viewStack.getVisibleChildName() === 'list') this.columnView.scrollTo(pos, null, flags, null)
+    if (this.viewStack.getVisibleChildName() === 'list')
+      this.columnView.scrollTo(pos, null, flags, null)
     else this.gridView.scrollTo(pos, flags, null)
   }
 
@@ -480,7 +572,7 @@ export class FileView {
   }
 
   finishLoading(emptyKind: EmptyKind = 'folder'): void {
-    this._flushInserts()   /* apply still-buffered batches before finalising */
+    this._flushInserts() /* apply still-buffered batches before finalising */
     this._loading = false
     this._cancelSpinner()
     /* Finalise the load: merge → sweep the rows that are gone; navigation where
@@ -500,7 +592,9 @@ export class FileView {
      * pins so later user scrolling sticks. A pending reveal takes precedence:
      * it re-selects and scrolls to its targets, overriding pin/restore, and is
      * a one-shot — cleared here so a later refresh doesn't re-hijack selection. */
-    const pinTop = this._pinTop, restore = this._restoreScroll, reveal = this._revealUris
+    const pinTop = this._pinTop
+    const restore = this._restoreScroll
+    const reveal = this._revealUris
     this._pinTop = false
     this._restoreScroll = -1
     this._revealUris = null
@@ -525,7 +619,7 @@ export class FileView {
     this.all = []
     this.rows = []
     this.store.removeAll()
-    this._errorPage.setDescription(message || 'The location could not be read.')
+    this._errorPage.setDescription(escapeMarkup(message || 'The location could not be read.'))
     this.stack.setVisibleChildName('error')
   }
 
@@ -534,13 +628,18 @@ export class FileView {
    * One splice, not per-item appends — each append is a full items-changed. */
   rebuild(): void {
     this._clearQueue()
-    const sorted = this.all.map(p => p.info).filter(this.filter).sort(this.cmp)
+    const sorted = this.all
+      .map((p) => p.info)
+      .filter(this.filter)
+      .sort(this.cmp)
     this.store.splice(0, this.store.getNItems(), sorted)
     this.rows = sorted
     if (!this._loading) this._settle()
   }
 
-  setMode(mode: ViewMode): void { this.viewStack.setVisibleChildName(mode === 'list' ? 'list' : 'grid') }
+  setMode(mode: ViewMode): void {
+    this.viewStack.setVisibleChildName(mode === 'list' ? 'list' : 'grid')
+  }
 
   /* Rebuild the list view's meta columns (everything after the fixed Name
    * column) from `configs`: the visible ones, in order. In the Trash the
@@ -549,13 +648,15 @@ export class FileView {
    * no-op when the visible set/order (and trash state) is unchanged, so it's
    * cheap to call on every pref sync. */
   setColumns(configs: ColumnConfig[], inTrash = false): void {
-    const visible = configs.filter(c => c.visible && COLUMN_DEF[c.id]).map(c => COLUMN_DEF[c.id])
+    const visible = configs
+      .filter((c) => c.visible && COLUMN_DEF[c.id])
+      .map((c) => COLUMN_DEF[c.id])
     if (inTrash) visible.push(TRASH_COLUMN)
-    const sig = visible.map(d => d.id).join(',')
+    const sig = visible.map((d) => d.id).join(',')
     if (sig === this._columnsSig) return
     this._columnsSig = sig
     for (const col of this._metaCols) this.columnView.removeColumn(col)
-    this._metaCols = visible.map(def => {
+    this._metaCols = visible.map((def) => {
       const col = metaColumn(def)
       this.columnView.appendColumn(col)
       return col
@@ -567,7 +668,9 @@ export class FileView {
     this.gridView.setFactory(gridFactory(this._cellContext()))
   }
 
-  selectAll(): void { this.selection.selectAll() }
+  selectAll(): void {
+    this.selection.selectAll()
+  }
 
   /* Replace the selection with every row whose name matches the shell glob
    * `pattern` (*, ? wildcards), like nautilus's "Select Items Matching" (Ctrl+S).
@@ -578,10 +681,11 @@ export class FileView {
     const match = globMatcher(pattern)
     const n = this.store.getNItems()
     this.selection.unselectAll()
-    let first = -1, count = 0
+    let first = -1
+    let count = 0
     for (let i = 0; i < n; i++) {
       if (!match(displayName(this.store.getItem(i)))) continue
-      this.selection.selectItem(i, false)   // add to selection, keep earlier matches
+      this.selection.selectItem(i, false) // add to selection, keep earlier matches
       if (first < 0) first = i
       count++
     }
@@ -594,7 +698,9 @@ export class FileView {
 
   /* Move keyboard focus into the visible view (e.g. to restore it after a dialog
    * that stole focus closes). */
-  focusView(): void { this._focusVisibleView() }
+  focusView(): void {
+    this._focusVisibleView()
+  }
 
   invertSelection(): void {
     const n = this.store.getNItems()
@@ -621,7 +727,10 @@ export class FileView {
   entries(): Entry[] {
     const out: Entry[] = []
     const n = this.store.getNItems()
-    for (let i = 0; i < n; i++) { const info = this.store.getItem(i); out.push({ info, file: info._file }) }
+    for (let i = 0; i < n; i++) {
+      const info = this.store.getItem(i)
+      out.push({ info, file: info._file })
+    }
     return out
   }
 
@@ -670,8 +779,14 @@ export class FileView {
    * (spinner + Cancel) wins, then an active typeahead query, then the selection
    * summary, else nothing. */
   _refreshBar(): void {
-    if (this._searchProgress) { this.floatingBar.show('Searching…', { spinner: true, stop: true }); return }
-    if (this._typeahead) { this.floatingBar.show(this._typeahead); return }
+    if (this._searchProgress) {
+      this.floatingBar.show('Searching…', { spinner: true, stop: true })
+      return
+    }
+    if (this._typeahead) {
+      this.floatingBar.show(this._typeahead)
+      return
+    }
     const text = this._selectionStatus()
     if (text) this.floatingBar.show(text)
     else this.floatingBar.hide()
@@ -682,17 +797,24 @@ export class FileView {
    * folders don't, since their inode size isn't the recursive total. */
   _selectionStatus(): string | null {
     const n = this.store.getNItems()
-    let files = 0, folders = 0, bytes = 0, firstName = ''
+    let files = 0
+    let folders = 0
+    let bytes = 0
+    let firstName = ''
     for (let i = 0; i < n; i++) {
       if (!this.selection.isSelected(i)) continue
       const info = this.store.getItem(i)
       if (!firstName) firstName = displayName(info)
       if (isDirectory(info)) folders++
-      else { files++; bytes += Number(info.getSize()) }
+      else {
+        files++
+        bytes += Number(info.getSize())
+      }
     }
     if (files + folders === 0) return null
     const size = formatBytes(bytes)
-    if (files + folders === 1) return folders === 1 ? `“${firstName}” selected` : `“${firstName}” selected (${size})`
+    if (files + folders === 1)
+      return folders === 1 ? `“${firstName}” selected` : `“${firstName}” selected (${size})`
     if (files === 0) return `${folders} folders selected`
     if (folders === 0) return `${files} items selected (${size})`
     return `${folders} ${folders === 1 ? 'folder' : 'folders'} selected, ${files} other ${files === 1 ? 'item' : 'items'} selected (${size})`
@@ -703,13 +825,16 @@ export class FileView {
     return {
       iconSize: () => this.iconSize,
       attachMenu: (w, item) => this._attachMenu(w, item),
-      isCut: info => this.isCutFile(info._file),
+      isCut: (info) => this.isCutFile(info._file),
     }
   }
 
   _settle(): void {
-    if (this.store.getNItems() > 0) { this.stack.setVisibleChildName('results'); this._applyPending() }
-    else this.stack.setVisibleChildName(this._emptyKind === 'search' ? 'empty-search' : 'empty-folder')
+    if (this.store.getNItems() > 0) {
+      this.stack.setVisibleChildName('results')
+      this._applyPending()
+    } else
+      this.stack.setVisibleChildName(this._emptyKind === 'search' ? 'empty-search' : 'empty-folder')
   }
 
   /* Merge a batch of already-filtered, not-yet-present infos into the sorted
@@ -724,12 +849,16 @@ export class FileView {
   _bulkInsertSorted(infos: GFileInfo[]): void {
     if (infos.length === 0) return
     infos.sort(this.cmp)
-    const cur = this.rows, n = cur.length
+    const cur = this.rows
+    const n = cur.length
     /* Merge the two sorted runs (existing rows keep their order; a new row lands
      * after existing rows it ties with, matching the old per-item insert). */
     const merged: GFileInfo[] = new Array(n + infos.length)
-    let a = 0, b = 0, m = 0
-    while (a < n && b < infos.length) merged[m++] = this.cmp(cur[a], infos[b]) <= 0 ? cur[a++] : infos[b++]
+    let a = 0
+    let b = 0
+    let m = 0
+    while (a < n && b < infos.length)
+      merged[m++] = this.cmp(cur[a], infos[b]) <= 0 ? cur[a++] : infos[b++]
     while (a < n) merged[m++] = cur[a++]
     while (b < infos.length) merged[m++] = infos[b++]
     const selected = this._selectedKeys()
@@ -743,12 +872,14 @@ export class FileView {
   _selectedKeys(): Set<string> | null {
     if (Number(this.selection.getSelection().getSize()) === 0) return null
     const keys = new Set<string>()
-    for (let i = 0; i < this.rows.length; i++) if (this.selection.isSelected(i)) keys.add(this.rows[i]._key)
+    for (let i = 0; i < this.rows.length; i++)
+      if (this.selection.isSelected(i)) keys.add(this.rows[i]._key)
     return keys
   }
 
   _reselectKeys(keys: Set<string>): void {
-    for (let i = 0; i < this.rows.length; i++) if (keys.has(this.rows[i]._key)) this.selection.selectItem(i, false)
+    for (let i = 0; i < this.rows.length; i++)
+      if (keys.has(this.rows[i]._key)) this.selection.selectItem(i, false)
   }
 
   _activate(pos: number): void {
@@ -769,25 +900,32 @@ export class FileView {
     widget.addController(gesture)
 
     /* Drag out the selection (or just this item if it isn't selected). */
-    widget.addController(makeDragSource(() => {
-      const pos = item.getPosition()
-      const file = this.store.getItem(pos)?._file
-      const selected = this.getSelected().map(s => s.file)
-      if (file && selected.includes(file)) return selected
-      return file ? [file] : []
-    }))
+    widget.addController(
+      makeDragSource(() => {
+        const pos = item.getPosition()
+        const file = this.store.getItem(pos)?._file
+        const selected = this.getSelected().map((s) => s.file)
+        if (file && selected.includes(file)) return selected
+        return file ? [file] : []
+      }),
+    )
 
     /* Drop onto a folder cell moves the dropped files into that folder. */
-    widget.addController(makeDropTarget(files => {
-      const info = this.store.getItem(item.getPosition())
-      if (info && isDirectory(info)) this.onDropFiles(files, info._file)
-    }))
+    widget.addController(
+      makeDropTarget((files) => {
+        const info = this.store.getItem(item.getPosition())
+        if (info && isDirectory(info)) this.onDropFiles(files, info._file)
+      }),
+    )
 
     /* Disable rubberband while an item is pressed so item-drag starts a DnD drag
      * rather than a rubberband (GTK issue 5670); re-enable on release/stop so
      * empty-space drag rubberbands. Non-claiming: normal click-to-select stays. */
     const press = new Gtk.GestureClick({ button: 1 })
-    press.on('pressed', () => { this._pressedOnItem = true; this._setRubberband(false) })
+    press.on('pressed', () => {
+      this._pressedOnItem = true
+      this._setRubberband(false)
+    })
     press.on('released', () => this._setRubberband(true))
     press.on('stopped', () => this._setRubberband(true))
     widget.addController(press)
@@ -799,7 +937,10 @@ export class FileView {
   _addBackgroundClick(view: any): void {
     const gesture = new Gtk.GestureClick({ button: 1 })
     gesture.on('pressed', () => {
-      if (!this._pressedOnItem) { this.selection.unselectAll(); view.grabFocus() }
+      if (!this._pressedOnItem) {
+        this.selection.unselectAll()
+        view.grabFocus()
+      }
       this._pressedOnItem = false
     })
     view.addController(gesture)
@@ -840,10 +981,19 @@ export class FileView {
      * shortcut controller. */
     if ((state & MODIFIER_MASK) === Gdk.ModifierType.ALT_MASK) {
       const dir = VIM_DIRS[Gdk.keyvalToLower(keyval)]
-      if (dir !== undefined) { this._clearTypeahead(); return this._vimMove(dir) }
+      if (dir !== undefined) {
+        this._clearTypeahead()
+        return this._vimMove(dir)
+      }
     }
-    if (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) { this._clearTypeahead(); return false }
-    if (keyval === Gdk.KEY_Escape) { this._clearTypeahead(); return false }
+    if (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) {
+      this._clearTypeahead()
+      return false
+    }
+    if (keyval === Gdk.KEY_Escape) {
+      this._clearTypeahead()
+      return false
+    }
 
     if (keyval === Gdk.KEY_BackSpace) {
       if (!this._typeahead) return false
@@ -855,7 +1005,8 @@ export class FileView {
     }
 
     const ch = Gdk.keyvalToUnicode(keyval)
-    if (!ch || ch < 0x20 || ch === 0x7f) {   /* not a printable char (0x7f = Delete) */
+    if (!ch || ch < 0x20 || ch === 0x7f) {
+      /* not a printable char (0x7f = Delete) */
       /* Any non-printable keystroke (Enter, Tab, arrows, …) cancels an
        * in-progress query; bare modifiers don't, so Shift+letter still types. */
       if (!MODIFIER_KEYS.has(keyval)) this._clearTypeahead()
@@ -863,7 +1014,10 @@ export class FileView {
     }
     const s = String.fromCodePoint(ch)
     /* Space with no active typeahead opens the preview (Quick Look), like nautilus. */
-    if (!this._typeahead && s === ' ') { this.onPreview(); return true }
+    if (!this._typeahead && s === ' ') {
+      this.onPreview()
+      return true
+    }
     this._typeahead += s
     this._armTypeaheadTimer()
     this._syncTypeaheadBar()
@@ -873,7 +1027,9 @@ export class FileView {
 
   /* Reflect the current typeahead buffer in the floating indicator (falling back
    * to the selection summary once the buffer empties — see _refreshBar). */
-  _syncTypeaheadBar(): void { this._refreshBar() }
+  _syncTypeaheadBar(): void {
+    this._refreshBar()
+  }
 
   /* Show the "Searching…" pill (spinner + Cancel) once the search outlives a
    * short delay, so a quick search never flashes it. Called on each search
@@ -889,7 +1045,10 @@ export class FileView {
   }
 
   hideSearchProgress(): void {
-    if (this._searchProgressTimer) { GLib.sourceRemove(this._searchProgressTimer); this._searchProgressTimer = 0 }
+    if (this._searchProgressTimer) {
+      GLib.sourceRemove(this._searchProgressTimer)
+      this._searchProgressTimer = 0
+    }
     if (!this._searchProgress) return
     this._searchProgress = false
     this._refreshBar()
@@ -909,10 +1068,13 @@ export class FileView {
     const query = this._typeahead
     const n = this.store.getNItems()
     let bestIndex = -1
-    let bestScore = -Infinity
+    let bestScore = Number.NEGATIVE_INFINITY
     for (let i = 0; i < n; i++) {
       const m = fuzzyMatch(query, displayName(this.store.getItem(i)), { ignoreTail: true })
-      if (m && m.score > bestScore) { bestScore = m.score; bestIndex = i }
+      if (m && m.score > bestScore) {
+        bestScore = m.score
+        bestIndex = i
+      }
     }
     if (bestIndex < 0) return
     this.selection.selectItem(bestIndex, true)
@@ -931,7 +1093,10 @@ export class FileView {
 
   _clearTypeahead(): void {
     if (!this._typeahead && !this._typeaheadTimer) return
-    if (this._typeaheadTimer) { GLib.sourceRemove(this._typeaheadTimer); this._typeaheadTimer = 0 }
+    if (this._typeaheadTimer) {
+      GLib.sourceRemove(this._typeaheadTimer)
+      this._typeaheadTimer = 0
+    }
     this._typeahead = ''
     this._refreshBar()
   }
@@ -960,7 +1125,7 @@ export class FileView {
       const anchor = forward ? sel.getMaximum() : sel.getMinimum()
       const step = dir === 'up' || dir === 'down' ? cols : 1
       target = forward ? anchor + step : anchor - step
-      if (target < 0 || target >= n) return true   /* at an edge — stay put */
+      if (target < 0 || target >= n) return true /* at an edge — stay put */
     }
     this.selection.selectItem(target, true)
     this._scrollItemIntoView(target, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT)
@@ -987,11 +1152,21 @@ export class FileView {
 }
 
 function scrolled(child: any): any {
-  return new Gtk.ScrolledWindow({ child, hexpand: true, vexpand: true, hscrollbarPolicy: Gtk.PolicyType.NEVER })
+  return new Gtk.ScrolledWindow({
+    child,
+    hexpand: true,
+    vexpand: true,
+    hscrollbarPolicy: Gtk.PolicyType.NEVER,
+  })
 }
 
 function loadingPage(): any {
-  const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 12, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER })
+  const box = new Gtk.Box({
+    orientation: Gtk.Orientation.VERTICAL,
+    spacing: 12,
+    halign: Gtk.Align.CENTER,
+    valign: Gtk.Align.CENTER,
+  })
   box.append(new Adw.Spinner({ widthRequest: 32, heightRequest: 32 }))
   box.append(new Gtk.Label({ label: 'Loading…', cssClasses: ['dim-label'] }))
   return box

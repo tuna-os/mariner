@@ -20,3 +20,19 @@ export function compressArgv(format: ArchiveFormat, out: string, names: string[]
       return ['7z', 'a', out, '--', ...names]
   }
 }
+
+/* File names "Extract Here" treats as archives. */
+export const ARCHIVE_RE = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2?|tar\.xz|txz|tar\.zst|7z|rar|jar)$/i
+
+/* Name of the folder an archive is extracted into: the archive's name without
+ * its extension, with a counter from the second attempt on (the caller asks
+ * again while the name is taken). Pure, so tests/ can import it.
+ *
+ * The name comes from the filesystem. `.zip`, `..zip` and `...zip` leave a stem
+ * that is empty, `.` or `..`, which would name the folder being viewed or its
+ * parent instead of a new folder, so those fall back to a fixed name. */
+export function extractFolderName(archiveName: string, attempt = 1): string {
+  const stem = archiveName.replace(ARCHIVE_RE, '')
+  const base = stem === '' || stem === '.' || stem === '..' ? 'Archive' : stem
+  return attempt > 1 ? `${base} (${attempt})` : base
+}

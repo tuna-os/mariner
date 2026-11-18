@@ -1,12 +1,10 @@
-import { compressArgv } from '../core/archive-argv.ts'
+import { ARCHIVE_RE, compressArgv, extractFolderName } from '../core/archive-argv.ts'
 import type { ArchiveFormat } from '../core/archive-argv.ts'
 import { EventEmitter } from '../core/emitter.ts'
 import { ProcessStream } from '../core/process-stream.ts'
 import type { GFile } from '../core/types.ts'
 
 export type { ArchiveFormat }
-
-const ARCHIVE_RE = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2?|tar\.xz|txz|tar\.zst|7z|rar|jar)$/i
 
 export function isArchive(name: string): boolean {
   return ARCHIVE_RE.test(name)
@@ -57,6 +55,32 @@ export class ArchiveService extends EventEmitter {
   }
   resume(id: number): void {
     this._streams.get(id)?.resume()
+  }
+
+  /* "Extract Here": unpack into a folder of its own, created now inside
+   * `parentDir` and named after the archive.
+   *
+   * The tools follow a symbolic link that already exists in the destination.
+   * Unpacking straight into `parentDir` therefore let one archive plant a link
+   * there and a later archive write through it, to any place the user can
+   * write. A folder that did not exist a moment ago holds nothing planted. */
+  extractToNewFolder(archive: GFile, parentDir: GFile): void {
+    if (!parentDir.getPath()) {
+      this._fail('Extract', 'Not a local location')
+      return
+    }
+    const name = archive.getBasename()
+    let dest = parentDir.getChild(extractFolderName(name))
+    for (let n = 2; dest.queryExists(null); n++)
+      dest = parentDir.getChild(extractFolderName(name, n))
+    try {
+      /* Fails if the name is taken after all (a dangling link, a race). */
+      dest.makeDirectory(null)
+    } catch (e) {
+      this._fail('Extract', e instanceof Error ? e.message : String(e))
+      return
+    }
+    this.extract(archive, dest)
   }
 
   async extract(archive: GFile, destDir: GFile): Promise<void> {

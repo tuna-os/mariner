@@ -1502,7 +1502,7 @@ export class AppWindow {
     if (!this.activeTab) return
     const dest = this.activeTab.location
     for (const s of this._selected())
-      if (isArchive(displayName(s.info))) this.archive.extract(s.file, dest)
+      if (isArchive(displayName(s.info))) this.archive.extractToNewFolder(s.file, dest)
   }
 
   async _compress(): Promise<void> {

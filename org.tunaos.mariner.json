@@ -91,16 +91,24 @@
       "name": "7z",
       "buildsystem": "simple",
       "build-commands": [
-        "cp makefile.linux_any_cpu makefile.machine",
-        "make -j$(nproc) 7za",
-        "install -Dm755 bin/7za /app/bin/7za",
-        "ln -s 7za /app/bin/7z"
+        "install -Dm755 7zzs /app/bin/7z",
+        "ln -s 7z /app/bin/7za",
+        "install -Dm644 License.txt /app/share/licenses/7zip/License.txt"
       ],
       "sources": [
         {
           "type": "archive",
-          "url": "https://github.com/p7zip-project/p7zip/archive/refs/tags/v17.05.tar.gz",
-          "sha256": "d2788f892571058c08d27095c22154579dfefb807ebe357d145ab2ddddefb1a6"
+          "url": "https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz",
+          "sha256": "2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e",
+          "strip-components": 0,
+          "only-arches": ["x86_64"]
+        },
+        {
+          "type": "archive",
+          "url": "https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-arm64.tar.xz",
+          "sha256": "edcc408aacce77da5223728f2eceb5e9f6dc713b8a9df934ad21e2a7f7560627",
+          "strip-components": 0,
+          "only-arches": ["aarch64"]
         }
       ]
     },

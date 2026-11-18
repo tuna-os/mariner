@@ -1,10 +1,15 @@
-import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
+import Gio from 'gi:Gio-2.0'
 import { EventEmitter } from '../core/emitter.ts'
-import { tagsService } from './tags-service.ts'
 import type { CopyItem, GFile } from '../core/types.ts'
+import { tagsService } from './tags-service.ts'
 
 const NONE = Gio.FileCopyFlags.NONE
+/* Every g_file_copy / g_file_move here. Without NOFOLLOW_SYMLINKS, gio copies
+ * what a symbolic link points to instead of the link: a link in a folder from
+ * someone else turns into a copy of the user's own file it names, and a link to
+ * a directory fails the whole job ("Can't recursively copy directory"). */
+const COPY_FLAGS = Gio.FileCopyFlags.NOFOLLOW_SYMLINKS
 const CREATE_NONE = Gio.FileCreateFlags.NONE
 const NOFOLLOW = Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS
 const TIME_SLICE_MS = 8
@@ -18,17 +23,47 @@ let nextJobId = 0
 
 type Step = () => void
 
-function fileType(file: GFile): any { return file.queryFileType(NOFOLLOW, null) }
-function isDir(file: GFile): boolean { return fileType(file) === Gio.FileType.DIRECTORY }
-function depth(file: GFile): number { const p = file.getPath(); return p ? p.split('/').length : 0 }
+/* The parts of GBytes, GInputStream and GOutputStream that StreamCopy calls. */
+interface GBytes {
+  getSize(): number | bigint
+}
+interface GInputStream {
+  readBytes(count: number, cancellable: null): GBytes
+  close(cancellable: null): void
+}
+interface GOutputStream {
+  writeBytes(bytes: GBytes, cancellable: null): number | bigint
+  close(cancellable: null): void
+}
+
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+function fileType(file: GFile): unknown {
+  return file.queryFileType(NOFOLLOW, null)
+}
+function isDir(file: GFile): boolean {
+  return fileType(file) === Gio.FileType.DIRECTORY
+}
+function depth(file: GFile): number {
+  const p = file.getPath()
+  return p ? p.split('/').length : 0
+}
 
 function fileSize(file: GFile): number {
-  try { return Number(file.queryInfo('standard::size', NOFOLLOW, null).getSize()) }
-  catch { return 0 }
+  try {
+    return Number(file.queryInfo('standard::size', NOFOLLOW, null).getSize())
+  } catch {
+    return 0
+  }
 }
 function deviceOf(file: GFile): number {
-  try { return Number(file.queryInfo('unix::device', NOFOLLOW, null).getAttributeUint32('unix::device')) }
-  catch { return -1 }
+  try {
+    return Number(file.queryInfo('unix::device', NOFOLLOW, null).getAttributeUint32('unix::device'))
+  } catch {
+    return -1
+  }
 }
 /* Are src and dest on different filesystems? (dest may not exist yet → use its
  * parent). Only a confident "different" answer enables streaming; unknowns fall
@@ -64,8 +99,8 @@ class StreamCopy {
   size: number
   bytesCopied = 0
   fraction = 0
-  _in: any = null
-  _out: any = null
+  _in: GInputStream | null = null
+  _out: GOutputStream | null = null
   _open = false
 
   constructor(src: GFile, dest: GFile, size: number) {
@@ -84,13 +119,19 @@ class StreamCopy {
   /* Copy one chunk; true at EOF (streams closed, metadata restored). */
   pumpChunk(): boolean {
     this._ensureOpen()
-    const bytes = this._in.readBytes(CHUNK, null)
+    const input = this._in
+    const output = this._out
+    if (!input || !output) throw new Error('Stream copy is not open')
+    const bytes = input.readBytes(CHUNK, null)
     const n = Number(bytes.getSize())
-    if (n === 0) { this._finish(); return true }
+    if (n === 0) {
+      this._finish()
+      return true
+    }
     let b = bytes
     let remaining = n
     while (remaining > 0) {
-      const w = Number(this._out.writeBytes(b, null))
+      const w = Number(output.writeBytes(b, null))
       if (w <= 0) break
       remaining -= w
       if (remaining > 0) b = GLib.Bytes.newFromBytes(b, w, remaining)
@@ -103,21 +144,33 @@ class StreamCopy {
   _finish(): void {
     this._close()
     try {
-      const info = this.src.queryInfo('unix::mode,unix::uid,unix::gid,time::modified,time::modified-usec', NOFOLLOW, null)
+      const info = this.src.queryInfo(
+        'unix::mode,unix::uid,unix::gid,time::modified,time::modified-usec',
+        NOFOLLOW,
+        null,
+      )
       this.dest.setAttributesFromInfo(info, NOFOLLOW, null)
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
   }
 
   _close(): void {
-    try { this._out?.close(null) } catch {}
-    try { this._in?.close(null) } catch {}
+    try {
+      this._out?.close(null)
+    } catch {}
+    try {
+      this._in?.close(null)
+    } catch {}
     this._open = false
   }
 
   /* Cancel mid-copy: drop streams and remove the partial destination. */
   abort(): void {
     this._close()
-    try { this.dest.delete(null) } catch {}
+    try {
+      this.dest.delete(null)
+    } catch {}
   }
 }
 
@@ -148,13 +201,19 @@ class Job {
     this.cancelled = true
     /* Re-arm a paused job so _tick runs once, observes `cancelled`, and finishes
      * (otherwise a cancelled-while-paused row would never clear). */
-    if (this.paused) { this.paused = false; this._arm() }
+    if (this.paused) {
+      this.paused = false
+      this._arm()
+    }
   }
 
   pause(): void {
     if (this.paused || this.cancelled) return
     this.paused = true
-    if (this.sourceId) { GLib.sourceRemove(this.sourceId); this.sourceId = 0 }
+    if (this.sourceId) {
+      GLib.sourceRemove(this.sourceId)
+      this.sourceId = 0
+    }
     this._emitProgress()
   }
 
@@ -165,7 +224,10 @@ class Job {
     this._emitProgress()
   }
 
-  push(step: Step): void { this.stack.push(step); this.discovered++ }
+  push(step: Step): void {
+    this.stack.push(step)
+    this.discovered++
+  }
 
   run(): void {
     this.service._register(this)
@@ -181,20 +243,45 @@ class Job {
   }
 
   _tick = (): boolean => {
-    if (this.cancelled) { this._abortStream(); this.sourceId = 0; this._finish(); return false }
-    const t0 = Number(GLib.getMonotonicTime())   /* getMonotonicTime returns a BigInt */
-    while ((this.stack.length || this.stream) && !this.cancelled && (Number(GLib.getMonotonicTime()) - t0) / 1000 < TIME_SLICE_MS) {
+    if (this.cancelled) {
+      this._abortStream()
+      this.sourceId = 0
+      this._finish()
+      return false
+    }
+    const t0 = Number(GLib.getMonotonicTime()) /* getMonotonicTime returns a BigInt */
+    while (
+      (this.stack.length || this.stream) &&
+      !this.cancelled &&
+      (Number(GLib.getMonotonicTime()) - t0) / 1000 < TIME_SLICE_MS
+    ) {
       if (this.stream) {
         let eof = false
-        try { eof = this.stream.pumpChunk() }
-        catch (e: any) { this._abortStream(); this.sourceId = 0; this._fail(e.message); return false }
+        try {
+          eof = this.stream.pumpChunk()
+        } catch (e) {
+          this._abortStream()
+          this.sourceId = 0
+          this._fail(messageOf(e))
+          return false
+        }
         this.partialFraction = this.stream?.fraction ?? 0
-        if (eof) { this.stream = null; this.partialFraction = 0; this.done++ }
+        if (eof) {
+          this.stream = null
+          this.partialFraction = 0
+          this.done++
+        }
         continue
       }
-      const step = this.stack.pop()!
-      try { step() }
-      catch (e: any) { this.sourceId = 0; this._fail(e.message); return false }
+      const step = this.stack.pop()
+      if (!step) break
+      try {
+        step()
+      } catch (e) {
+        this.sourceId = 0
+        this._fail(messageOf(e))
+        return false
+      }
       /* A step that started a stream (large-file copy) is counted on EOF, not now. */
       if (!this.stream) this.done++
     }
@@ -206,11 +293,23 @@ class Job {
   }
 
   _emitProgress(): void {
-    this.service.emit('progress', { id: this.id, title: this.title, done: this.done + this.partialFraction, total: this.discovered, paused: this.paused })
+    this.service.emit('progress', {
+      id: this.id,
+      title: this.title,
+      done: this.done + this.partialFraction,
+      total: this.discovered,
+      paused: this.paused,
+    })
   }
 
   _abortStream(): void {
-    if (this.stream) { try { this.stream.abort() } catch {} this.stream = null; this.partialFraction = 0 }
+    if (this.stream) {
+      try {
+        this.stream.abort()
+      } catch {}
+      this.stream = null
+      this.partialFraction = 0
+    }
   }
 
   _fail(message: string): void {
@@ -220,18 +319,26 @@ class Job {
 
   _finish(): void {
     this.service._unregister(this)
-    this.service.emit('done', { id: this.id, title: this.title, count: this.done, cancelled: this.cancelled })
+    this.service.emit('done', {
+      id: this.id,
+      title: this.title,
+      count: this.done,
+      cancelled: this.cancelled,
+    })
   }
 
   copyStep(src: GFile, dest: GFile): Step {
     return () => {
       if (isDir(src)) {
         dest.makeDirectoryWithParents(null)
-        this._eachChild(src, name => this.push(this.copyStep(src.getChild(name), dest.getChild(name))))
+        this._eachChild(src, (name) =>
+          this.push(this.copyStep(src.getChild(name), dest.getChild(name))),
+        )
       } else {
         const size = fileSize(src)
-        if (size >= STREAM_THRESHOLD && crossDevice(src, dest)) this.stream = new StreamCopy(src, dest, size)
-        else src.copy(dest, NONE, null, null)
+        if (size >= STREAM_THRESHOLD && crossDevice(src, dest))
+          this.stream = new StreamCopy(src, dest, size)
+        else src.copy(dest, COPY_FLAGS, null, null)
       }
     }
   }
@@ -239,8 +346,8 @@ class Job {
   deleteStep(file: GFile): Step {
     return () => {
       if (isDir(file)) {
-        this.push(() => file.delete(null))   /* runs last: dir removed after contents */
-        this._eachChild(file, name => this.push(this.deleteStep(file.getChild(name))))
+        this.push(() => file.delete(null)) /* runs last: dir removed after contents */
+        this._eachChild(file, (name) => this.push(this.deleteStep(file.getChild(name))))
       } else {
         file.delete(null)
       }
@@ -250,13 +357,17 @@ class Job {
   /* rmdir a merge source dir, but only if it's now empty (kernel ENOTEMPTY →
    * quietly left behind, e.g. when a nested leaf was skipped). */
   rmdirStep(dir: GFile): Step {
-    return () => { try { dir.delete(null) } catch {} }
+    return () => {
+      try {
+        dir.delete(null)
+      } catch {}
+    }
   }
 
   moveStep(src: GFile, dest: GFile): Step {
     return () => {
       try {
-        src.move(dest, NONE, null, null)
+        src.move(dest, COPY_FLAGS, null, null)
       } catch {
         /* cross-device: copy fully, then delete source */
         this.push(this.deleteStep(src))
@@ -270,8 +381,7 @@ class Job {
 
   _eachChild(dir: GFile, fn: (name: string) => void): void {
     const en = dir.enumerateChildren('standard::name', NOFOLLOW, null)
-    let info
-    while ((info = en.nextFile(null)) !== null) fn(info.getName())
+    for (let info = en.nextFile(null); info !== null; info = en.nextFile(null)) fn(info.getName())
     en.close(null)
   }
 }
@@ -285,12 +395,22 @@ class Job {
 export class FileOperations extends EventEmitter {
   _jobs = new Map<number, Job>()
 
-  _register(job: Job): void { this._jobs.set(job.id, job) }
-  _unregister(job: Job): void { this._jobs.delete(job.id) }
+  _register(job: Job): void {
+    this._jobs.set(job.id, job)
+  }
+  _unregister(job: Job): void {
+    this._jobs.delete(job.id)
+  }
   /* Request cancellation of an in-flight long operation by id. */
-  cancel(id: number): void { this._jobs.get(id)?.cancel() }
-  pause(id: number): void { this._jobs.get(id)?.pause() }
-  resume(id: number): void { this._jobs.get(id)?.resume() }
+  cancel(id: number): void {
+    this._jobs.get(id)?.cancel()
+  }
+  pause(id: number): void {
+    this._jobs.get(id)?.pause()
+  }
+  resume(id: number): void {
+    this._jobs.get(id)?.resume()
+  }
 
   /* Run an explicit copy/move plan (destinations already collision-resolved) and
    * return those destinations so the caller can record a precise undo. `replace`
@@ -303,7 +423,7 @@ export class FileOperations extends EventEmitter {
       if (it.replace && it.dest.queryExists(null)) job.push(job.deleteStep(it.dest))
     }
     job.run()
-    return items.map(i => i.dest)
+    return items.map((i) => i.dest)
   }
 
   /* `prune` lists merge source directories to rmdir-if-empty after the moves (see
@@ -317,22 +437,29 @@ export class FileOperations extends EventEmitter {
       if (it.replace && it.dest.queryExists(null)) job.push(job.deleteStep(it.dest))
     }
     job.run()
-    return items.map(i => i.dest)
+    return items.map((i) => i.dest)
   }
 
   /* Auto-rename wrappers (no conflict prompt) for callers without a resolved
    * plan: system-clipboard paste, undo/redo re-runs. */
   copy(files: GFile[], destDir: GFile): GFile[] {
-    return this.copyItems(files.map(f => ({ src: f, dest: uniqueChild(destDir, f.getBasename()) })))
+    return this.copyItems(
+      files.map((f) => ({ src: f, dest: uniqueChild(destDir, f.getBasename()) })),
+    )
   }
 
   move(files: GFile[], destDir: GFile): GFile[] {
-    return this.moveItems(files.map(f => ({ src: f, dest: uniqueChild(destDir, f.getBasename()) })))
+    return this.moveItems(
+      files.map((f) => ({ src: f, dest: uniqueChild(destDir, f.getBasename()) })),
+    )
   }
 
   deletePermanently(files: GFile[]): void {
     const job = new Job(`Deleting ${files.length} item${files.length > 1 ? 's' : ''}`, this)
-    for (const f of files) { job.push(job.deleteStep(f)); tagsService.dropPrefix(f.getUri()) }
+    for (const f of files) {
+      job.push(job.deleteStep(f))
+      tagsService.dropPrefix(f.getUri())
+    }
     job.run()
   }
 
@@ -340,8 +467,8 @@ export class FileOperations extends EventEmitter {
     const job = new Job('Emptying Trash', this)
     const trash = Gio.File.newForUri('trash:///')
     const en = trash.enumerateChildren('standard::name', NONE, null)
-    let info
-    while ((info = en.nextFile(null)) !== null) job.push(job.deleteStep(trash.getChild(info.getName())))
+    for (let info = en.nextFile(null); info !== null; info = en.nextFile(null))
+      job.push(job.deleteStep(trash.getChild(info.getName())))
     en.close(null)
     job.run()
   }
@@ -352,17 +479,30 @@ export class FileOperations extends EventEmitter {
     /* Drop the tag-index rows for trashed trees: the trash URI is unpredictable,
      * and the xattr stays on the trashed file, so a restore re-heals its tags
      * on the next listing. */
-    return this._quick('Move to Trash', () => files.forEach((f: GFile) => { f.trash(null); tagsService.dropPrefix(f.getUri()) }),
-      `Moved ${n} item${n > 1 ? 's' : ''} to Trash`)
+    return this._quick(
+      'Move to Trash',
+      () => {
+        for (const f of files) {
+          f.trash(null)
+          tagsService.dropPrefix(f.getUri())
+        }
+      },
+      `Moved ${n} item${n > 1 ? 's' : ''} to Trash`,
+    )
   }
 
   /* Restore selected Trash items to their original locations, given each item's
    * trash::orig-path (used by the Trash view's Restore action). */
   restore(pairs: Array<[GFile, string]>): boolean {
     const n = pairs.length
-    return this._quick('Restore', () => {
-      for (const [item, orig] of pairs) item.move(Gio.File.newForPath(orig), NONE, null, null)
-    }, `Restored ${n} item${n > 1 ? 's' : ''}`)
+    return this._quick(
+      'Restore',
+      () => {
+        for (const [item, orig] of pairs)
+          item.move(Gio.File.newForPath(orig), COPY_FLAGS, null, null)
+      },
+      `Restored ${n} item${n > 1 ? 's' : ''}`,
+    )
   }
 
   /* Restore selected Trash items into an explicit destination folder (the Trash
@@ -370,29 +510,37 @@ export class FileOperations extends EventEmitter {
    * display name so two same-named items don't clobber each other. */
   restoreTo(items: Array<{ file: GFile; name: string }>, destDir: GFile): boolean {
     const n = items.length
-    return this._quick('Restore', () => {
-      for (const { file, name } of items) file.move(uniqueChild(destDir, name), NONE, null, null)
-    }, `Restored ${n} item${n > 1 ? 's' : ''}`)
+    return this._quick(
+      'Restore',
+      () => {
+        for (const { file, name } of items)
+          file.move(uniqueChild(destDir, name), COPY_FLAGS, null, null)
+      },
+      `Restored ${n} item${n > 1 ? 's' : ''}`,
+    )
   }
 
   /* Restore items from Trash to their original locations (undo of trash), matched
    * by trash::orig-path. */
   restoreFromTrash(origFiles: GFile[]): boolean {
-    const wanted = new Set(origFiles.map(f => f.getPath()))
+    const wanted = new Set(origFiles.map((f) => f.getPath()))
     const n = origFiles.length
-    return this._quick('Restore', () => {
-      const trash = Gio.File.newForUri('trash:///')
-      const en = trash.enumerateChildren('standard::name,trash::orig-path', NONE, null)
-      let info
-      while ((info = en.nextFile(null)) !== null) {
-        const orig = info.getAttributeByteString('trash::orig-path')
-        if (orig && wanted.has(orig)) {
-          trash.getChild(info.getName()).move(Gio.File.newForPath(orig), NONE, null, null)
-          wanted.delete(orig)
+    return this._quick(
+      'Restore',
+      () => {
+        const trash = Gio.File.newForUri('trash:///')
+        const en = trash.enumerateChildren('standard::name,trash::orig-path', NONE, null)
+        for (let info = en.nextFile(null); info !== null; info = en.nextFile(null)) {
+          const orig = info.getAttributeByteString('trash::orig-path')
+          if (orig && wanted.has(orig)) {
+            trash.getChild(info.getName()).move(Gio.File.newForPath(orig), COPY_FLAGS, null, null)
+            wanted.delete(orig)
+          }
         }
-      }
-      en.close(null)
-    }, `Restored ${n} item${n > 1 ? 's' : ''}`)
+        en.close(null)
+      },
+      `Restored ${n} item${n > 1 ? 's' : ''}`,
+    )
   }
   newFolder(dir: GFile, name: string): GFile {
     const folder = dir.getChild(name)
@@ -401,21 +549,34 @@ export class FileOperations extends EventEmitter {
   }
   rename(file: GFile, newName: string): GFile | null {
     let out: GFile | null = null
-    this._quick('Rename', () => {
-      out = file.setDisplayName(newName, null)
-      if (out) tagsService.rekeyPrefix(file.getUri(), (out as GFile).getUri())
-    }, `Renamed to “${newName}”`)
+    this._quick(
+      'Rename',
+      () => {
+        out = file.setDisplayName(newName, null)
+        if (out) tagsService.rekeyPrefix(file.getUri(), (out as GFile).getUri())
+      },
+      `Renamed to “${newName}”`,
+    )
     return out
   }
   link(files: GFile[], destDir: GFile): boolean {
-    return this._quick('Create Link', () => {
-      for (const f of files) uniqueChild(destDir, f.getBasename()).makeSymbolicLink(f.getPath(), null)
-    }, 'Link created')
+    return this._quick(
+      'Create Link',
+      () => {
+        for (const f of files)
+          uniqueChild(destDir, f.getBasename()).makeSymbolicLink(f.getPath(), null)
+      },
+      'Link created',
+    )
   }
 
   _quick(title: string, fn: () => void, message: string): boolean {
-    try { fn() }
-    catch (e: any) { this.emit('error', { title, message: e.message }); return false }
+    try {
+      fn()
+    } catch (e) {
+      this.emit('error', { title, message: messageOf(e) })
+      return false
+    }
     this.emit('notify', { message })
     return true
   }

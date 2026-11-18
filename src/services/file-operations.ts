@@ -5,6 +5,11 @@ import { tagsService } from './tags-service.ts'
 import type { CopyItem, GFile } from '../core/types.ts'
 
 const NONE = Gio.FileCopyFlags.NONE
+/* Every g_file_copy / g_file_move here. Without NOFOLLOW_SYMLINKS, gio copies
+ * what a symbolic link points to instead of the link: a link in a folder from
+ * someone else turns into a copy of the user's own file it names, and a link to
+ * a directory fails the whole job ("Can't recursively copy directory"). */
+const COPY_FLAGS = Gio.FileCopyFlags.NOFOLLOW_SYMLINKS
 const CREATE_NONE = Gio.FileCreateFlags.NONE
 const NOFOLLOW = Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS
 const TIME_SLICE_MS = 8
@@ -231,7 +236,7 @@ class Job {
       } else {
         const size = fileSize(src)
         if (size >= STREAM_THRESHOLD && crossDevice(src, dest)) this.stream = new StreamCopy(src, dest, size)
-        else src.copy(dest, NONE, null, null)
+        else src.copy(dest, COPY_FLAGS, null, null)
       }
     }
   }
@@ -256,7 +261,7 @@ class Job {
   moveStep(src: GFile, dest: GFile): Step {
     return () => {
       try {
-        src.move(dest, NONE, null, null)
+        src.move(dest, COPY_FLAGS, null, null)
       } catch {
         /* cross-device: copy fully, then delete source */
         this.push(this.deleteStep(src))
@@ -361,7 +366,7 @@ export class FileOperations extends EventEmitter {
   restore(pairs: Array<[GFile, string]>): boolean {
     const n = pairs.length
     return this._quick('Restore', () => {
-      for (const [item, orig] of pairs) item.move(Gio.File.newForPath(orig), NONE, null, null)
+      for (const [item, orig] of pairs) item.move(Gio.File.newForPath(orig), COPY_FLAGS, null, null)
     }, `Restored ${n} item${n > 1 ? 's' : ''}`)
   }
 
@@ -371,7 +376,7 @@ export class FileOperations extends EventEmitter {
   restoreTo(items: Array<{ file: GFile; name: string }>, destDir: GFile): boolean {
     const n = items.length
     return this._quick('Restore', () => {
-      for (const { file, name } of items) file.move(uniqueChild(destDir, name), NONE, null, null)
+      for (const { file, name } of items) file.move(uniqueChild(destDir, name), COPY_FLAGS, null, null)
     }, `Restored ${n} item${n > 1 ? 's' : ''}`)
   }
 
@@ -387,7 +392,7 @@ export class FileOperations extends EventEmitter {
       while ((info = en.nextFile(null)) !== null) {
         const orig = info.getAttributeByteString('trash::orig-path')
         if (orig && wanted.has(orig)) {
-          trash.getChild(info.getName()).move(Gio.File.newForPath(orig), NONE, null, null)
+          trash.getChild(info.getName()).move(Gio.File.newForPath(orig), COPY_FLAGS, null, null)
           wanted.delete(orig)
         }
       }

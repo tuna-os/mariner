@@ -4,6 +4,7 @@ import { EventEmitter } from '../core/emitter.ts'
 import { openWalDatabase, readDataVersion } from '../core/sqlite-db.ts'
 import { setTagsColumnFormatter } from '../core/columns.ts'
 import { fileForUri } from '../core/gio.ts'
+import { MAX_DISCOVERED_TAGS, tagNamesFromXattr, validateTagName } from '../core/tag-names.ts'
 import type { GFile, GFileInfo } from '../core/types.ts'
 
 /* File tags (see GNOME Design whiteboard #332). Three layers:
@@ -83,19 +84,7 @@ export function tagFromUri(uri: string): string | null {
   try { return decodeURIComponent(m[1]) } catch { return m[1] }
 }
 
-/* Tag names separate on commas in the xattr, so they can't contain one. */
-export function validateTagName(name: string): string | null {
-  const n = name.trim()
-  if (!n) return null
-  if (n.includes(',')) return null
-  if (n.length > 64) return null
-  return n
-}
-
-function parseXattr(raw: string | null | undefined): string[] {
-  if (!raw) return []
-  return raw.split(',').map(s => s.trim()).filter(Boolean)
-}
+export { validateTagName }
 
 function sameNames(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i])
@@ -428,7 +417,8 @@ export class TagsService extends EventEmitter {
     const uri = file.getUri()
     if (!uri.startsWith('file://')) return
     this._ensure()
-    const names = parseXattr(info.getAttributeString?.(XATTR_TAGS))
+    const names = tagNamesFromXattr(
+      info.getAttributeString?.(XATTR_TAGS), n => this._tags.has(n), MAX_DISCOVERED_TAGS - this._tags.size)
     const cur = this._byUri.get(uri)
     if (!names.length && !cur) return                        /* untagged, unindexed — the common case */
     const curXattr = (cur ?? []).filter(e => e.src === 'xattr').map(e => e.tag)

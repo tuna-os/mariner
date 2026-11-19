@@ -23,7 +23,7 @@
   },
   "overrides": [
     {
-      "include": ["src/window.ts", "src/ui/file-view.ts"],
+      "include": ["src/window.ts", "src/ui/file-view.ts", "src/services/tags-service.ts"],
       "linter": {
         "rules": {
           "suspicious": {

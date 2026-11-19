@@ -1,9 +1,9 @@
-import Gio from 'gi:Gio-2.0'
 import GLib from 'gi:GLib-2.0'
-import { EventEmitter } from '../core/emitter.ts'
-import { openWalDatabase, readDataVersion } from '../core/sqlite-db.ts'
+import Gio from 'gi:Gio-2.0'
 import { setTagsColumnFormatter } from '../core/columns.ts'
+import { EventEmitter } from '../core/emitter.ts'
 import { fileForUri } from '../core/gio.ts'
+import { openWalDatabase, readDataVersion } from '../core/sqlite-db.ts'
 import { MAX_DISCOVERED_TAGS, tagNamesFromXattr, validateTagName } from '../core/tag-names.ts'
 import type { GFile, GFileInfo } from '../core/types.ts'
 
@@ -38,13 +38,16 @@ export const XATTR_TAGS = 'xattr::xdg.tags'
 
 export interface Tag {
   name: string
-  color: string | null   /* a TAG_COLORS key, or null for a text tag */
+  color: string | null /* a TAG_COLORS key, or null for a text tag */
   /* Hidden tags keep their data (assignments, xattrs) but appear nowhere in
    * the UI except the "Hidden Tags" page, where they can be unhidden. */
   hidden: boolean
 }
 
-interface Assignment { tag: string; src: 'xattr' | 'index' }
+interface Assignment {
+  tag: string
+  src: 'xattr' | 'index'
+}
 
 /* The nine tag colors: libadwaita's system accent palette, referenced through
  * its CSS variables (--accent-blue …) so they adapt to the light/dark style.
@@ -63,11 +66,13 @@ export const TAG_COLORS: Array<{ key: string; label: string; cssVar: string; hex
   { key: 'slate', label: 'Slate', cssVar: '--accent-slate', hex: '#6f8396' },
 ]
 
-export const TAG_COLOR: Record<string, { key: string; label: string; cssVar: string; hex: string }> =
-  Object.fromEntries(TAG_COLORS.map(c => [c.key, c]))
+export const TAG_COLOR: Record<
+  string,
+  { key: string; label: string; cssVar: string; hex: string }
+> = Object.fromEntries(TAG_COLORS.map((c) => [c.key, c]))
 
-const DIR = GLib.getUserDataDir() + '/mariner'
-const DB_FILE = DIR + '/tags.db'
+const DIR = `${GLib.getUserDataDir()}/mariner`
+const DB_FILE = `${DIR}/tags.db`
 
 /* tag:///<name> — the virtual location listing a tag's files. The root
  * (tag:///) is the Tags overview page. HIDDEN_TAGS_NAME is a reserved child
@@ -75,13 +80,21 @@ const DB_FILE = DIR + '/tags.db'
  * tag name (validateTagName rejects commas). */
 export const HIDDEN_TAGS_NAME = ',hidden'
 export const HIDDEN_TAGS_URI = 'tag:///,hidden'
-export function tagUri(name: string): string { return 'tag:///' + encodeURIComponent(name) }
-export function isTagUri(uri: string): boolean { return uri.startsWith('tag:') }
+export function tagUri(name: string): string {
+  return `tag:///${encodeURIComponent(name)}`
+}
+export function isTagUri(uri: string): boolean {
+  return uri.startsWith('tag:')
+}
 /* The tag name of a tag:// URI, or null for the root (all tags). */
 export function tagFromUri(uri: string): string | null {
   const m = /^tag:\/\/\/(.+)$/.exec(uri)
   if (!m) return null
-  try { return decodeURIComponent(m[1]) } catch { return m[1] }
+  try {
+    return decodeURIComponent(m[1])
+  } catch {
+    return m[1]
+  }
 }
 
 export { validateTagName }
@@ -94,7 +107,7 @@ export class TagsService extends EventEmitter {
   _db: any = null
   _ready = false
   _enabled = true
-  _tags = new Map<string, Tag>()                  /* insertion order = sort order */
+  _tags = new Map<string, Tag>() /* insertion order = sort order */
   _byUri = new Map<string, Assignment[]>()
   _monitor: any = null
   _monitorDebounce = 0
@@ -146,7 +159,9 @@ export class TagsService extends EventEmitter {
   _migrate(): void {
     const ver = Number(this._db.prepare('PRAGMA user_version').get().user_version)
     if (ver === 0) {
-      const ins = this._db.prepare('INSERT OR IGNORE INTO tags (name, color, sort) VALUES (?, ?, ?)')
+      const ins = this._db.prepare(
+        'INSERT OR IGNORE INTO tags (name, color, sort) VALUES (?, ?, ?)',
+      )
       TAG_COLORS.forEach((c, i) => ins.run(c.label, c.key, i))
     } else if (ver === 1) {
       this._db.exec('ALTER TABLE tags ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0')
@@ -157,16 +172,28 @@ export class TagsService extends EventEmitter {
 
   _loadAll(): void {
     this._tags = new Map()
-    for (const row of this._db.prepare('SELECT name, color, hidden FROM tags ORDER BY sort, name').all())
+    for (const row of this._db
+      .prepare('SELECT name, color, hidden FROM tags ORDER BY sort, name')
+      .all())
       this._tags.set(row.name, { name: row.name, color: row.color ?? null, hidden: !!row.hidden })
     this._byUri = new Map()
-    for (const row of this._db.prepare('SELECT uri, tag, src FROM assignments ORDER BY uri, pos').all()) {
+    for (const row of this._db
+      .prepare('SELECT uri, tag, src FROM assignments ORDER BY uri, pos')
+      .all()) {
       let arr = this._byUri.get(row.uri)
-      if (!arr) this._byUri.set(row.uri, arr = [])
+      if (!arr) {
+        arr = []
+        this._byUri.set(row.uri, arr)
+      }
       arr.push({ tag: row.tag, src: row.src === 'index' ? 'index' : 'xattr' })
     }
-    try { this._enabled = this._db.prepare('SELECT value FROM settings WHERE key = ?').get('tags-enabled')?.value !== '0' }
-    catch { this._enabled = true }
+    try {
+      this._enabled =
+        this._db.prepare('SELECT value FROM settings WHERE key = ?').get('tags-enabled')?.value !==
+        '0'
+    } catch {
+      this._enabled = true
+    }
   }
 
   /* Other-process sync: WAL commits from another Mariner process touch the
@@ -182,13 +209,17 @@ export class TagsService extends EventEmitter {
           const v = readDataVersion(this._db)
           if (v !== this._dataVersion) {
             this._dataVersion = v
-            try { this._loadAll() } catch {}
+            try {
+              this._loadAll()
+            } catch {}
             this.emit('changed', null)
           }
           return false
         })
       })
-    } catch { /* no monitor backend — same-process events still flow */ }
+    } catch {
+      /* no monitor backend — same-process events still flow */
+    }
   }
 
   /* ---- registry ---- */
@@ -197,7 +228,10 @@ export class TagsService extends EventEmitter {
    * accessors return nothing so tags vanish from every UI surface; the data
    * (registry, index, xattrs) is untouched and comes back on re-enable.
    * Persisted in the settings table, so all windows/processes follow. */
-  get enabled(): boolean { this._ensure(); return this._enabled }
+  get enabled(): boolean {
+    this._ensure()
+    return this._enabled
+  }
 
   setEnabled(on: boolean): void {
     this._ensure()
@@ -207,20 +241,26 @@ export class TagsService extends EventEmitter {
     this.emit('changed', null)
   }
 
-  tags(): Tag[] { this._ensure(); return [...this._tags.values()] }
+  tags(): Tag[] {
+    this._ensure()
+    return [...this._tags.values()]
+  }
   /* Tags that appear in the UI (sidebar, menus, dots, search) — everywhere
    * except the Hidden Tags page. */
   visibleTags(): Tag[] {
     this._ensure()
     if (!this._enabled) return []
-    return [...this._tags.values()].filter(t => !t.hidden)
+    return [...this._tags.values()].filter((t) => !t.hidden)
   }
   hiddenTags(): Tag[] {
     this._ensure()
     if (!this._enabled) return []
-    return [...this._tags.values()].filter(t => t.hidden)
+    return [...this._tags.values()].filter((t) => t.hidden)
   }
-  getTag(name: string): Tag | null { this._ensure(); return this._tags.get(name) ?? null }
+  getTag(name: string): Tag | null {
+    this._ensure()
+    return this._tags.get(name) ?? null
+  }
 
   createTag(name: string, color: string | null): Tag | null {
     this._ensure()
@@ -228,7 +268,12 @@ export class TagsService extends EventEmitter {
     if (!n || this._tags.has(n)) return null
     const tag: Tag = { name: n, color: color && TAG_COLOR[color] ? color : null, hidden: false }
     this._tags.set(n, tag)
-    this._sql('INSERT OR IGNORE INTO tags (name, color, sort) VALUES (?, ?, ?)', n, tag.color, this._tags.size)
+    this._sql(
+      'INSERT OR IGNORE INTO tags (name, color, sort) VALUES (?, ?, ?)',
+      n,
+      tag.color,
+      this._tags.size,
+    )
     this.emit('changed', null)
     return tag
   }
@@ -246,10 +291,11 @@ export class TagsService extends EventEmitter {
       this._sql('UPDATE assignments SET tag = ? WHERE tag = ?', n, oldName)
     })
     /* Rebuild the registry map preserving order. */
-    this._tags = new Map([...this._tags.entries()].map(([k, v]) =>
-      k === oldName ? [n, { ...v, name: n }] : [k, v]))
+    this._tags = new Map(
+      [...this._tags.entries()].map(([k, v]) => (k === oldName ? [n, { ...v, name: n }] : [k, v])),
+    )
     for (const [uri, entries] of this._byUri) {
-      const hit = entries.find(e => e.tag === oldName)
+      const hit = entries.find((e) => e.tag === oldName)
       if (!hit) continue
       hit.tag = n
       this._rewriteXattr(uri, entries)
@@ -284,12 +330,15 @@ export class TagsService extends EventEmitter {
   moveTagBefore(name: string, beforeName: string | null): void {
     this._ensure()
     if (!this._tags.has(name) || name === beforeName) return
-    const order = [...this._tags.keys()].filter(n => n !== name)
+    const order = [...this._tags.keys()].filter((n) => n !== name)
     const at = beforeName != null ? order.indexOf(beforeName) : -1
     if (beforeName != null && at < 0) return
     order.splice(at < 0 ? order.length : at, 0, name)
-    this._tags = new Map(order.map(n => [n, this._tags.get(n)!]))
-    this._tx(() => order.forEach((n, i) => this._sql('UPDATE tags SET sort = ? WHERE name = ?', i, n)))
+    // biome-ignore lint/style/noNonNullAssertion: `order` holds only keys of this._tags
+    this._tags = new Map(order.map((n) => [n, this._tags.get(n)!]))
+    this._tx(() =>
+      order.forEach((n, i) => this._sql('UPDATE tags SET sort = ? WHERE name = ?', i, n)),
+    )
     this.emit('changed', null)
   }
 
@@ -302,8 +351,8 @@ export class TagsService extends EventEmitter {
       this._sql('DELETE FROM tags WHERE name = ?', name)
     })
     for (const [uri, entries] of [...this._byUri]) {
-      if (!entries.some(e => e.tag === name)) continue
-      const kept = entries.filter(e => e.tag !== name)
+      if (!entries.some((e) => e.tag === name)) continue
+      const kept = entries.filter((e) => e.tag !== name)
       if (kept.length) this._byUri.set(uri, kept)
       else this._byUri.delete(uri)
       this._rewriteXattr(uri, kept)
@@ -317,7 +366,11 @@ export class TagsService extends EventEmitter {
     for (const name of names) {
       if (this._tags.has(name)) continue
       this._tags.set(name, { name, color: null, hidden: false })
-      this._sql('INSERT OR IGNORE INTO tags (name, color, sort) VALUES (?, NULL, ?)', name, this._tags.size)
+      this._sql(
+        'INSERT OR IGNORE INTO tags (name, color, sort) VALUES (?, NULL, ?)',
+        name,
+        this._tags.size,
+      )
       created = true
     }
     if (created) this.emit('changed', null)
@@ -327,7 +380,7 @@ export class TagsService extends EventEmitter {
 
   tagsOf(uri: string): string[] {
     this._ensure()
-    return (this._byUri.get(uri) ?? []).map(e => e.tag)
+    return (this._byUri.get(uri) ?? []).map((e) => e.tag)
   }
 
   /* The tag objects for a URI in assignment order, for DISPLAY surfaces (cell
@@ -347,7 +400,7 @@ export class TagsService extends EventEmitter {
   filesWith(tag: string): string[] {
     this._ensure()
     const out: string[] = []
-    for (const [uri, entries] of this._byUri) if (entries.some(e => e.tag === tag)) out.push(uri)
+    for (const [uri, entries] of this._byUri) if (entries.some((e) => e.tag === tag)) out.push(uri)
     return out
   }
 
@@ -377,7 +430,10 @@ export class TagsService extends EventEmitter {
     const uri = file.getUri()
     const ok = this._writeXattr(file, clean)
     const src: 'xattr' | 'index' = ok ? 'xattr' : 'index'
-    this._setIndex(uri, clean.map(tag => ({ tag, src })))
+    this._setIndex(
+      uri,
+      clean.map((tag) => ({ tag, src })),
+    )
     this.emit('changed', [uri])
   }
 
@@ -391,7 +447,11 @@ export class TagsService extends EventEmitter {
   removeTag(files: GFile[], name: string): void {
     for (const f of files) {
       const cur = this.tagsOf(f.getUri())
-      if (cur.includes(name)) this.setTags(f, cur.filter(t => t !== name))
+      if (cur.includes(name))
+        this.setTags(
+          f,
+          cur.filter((t) => t !== name),
+        )
     }
   }
 
@@ -399,7 +459,7 @@ export class TagsService extends EventEmitter {
    * from all; otherwise add it to the ones lacking it. */
   toggleTag(files: GFile[], name: string): void {
     this._ensure()
-    const all = files.every(f => this.tagsOf(f.getUri()).includes(name))
+    const all = files.every((f) => this.tagsOf(f.getUri()).includes(name))
     if (all) this.removeTag(files, name)
     else this.addTag(files, name)
   }
@@ -418,13 +478,16 @@ export class TagsService extends EventEmitter {
     if (!uri.startsWith('file://')) return
     this._ensure()
     const names = tagNamesFromXattr(
-      info.getAttributeString?.(XATTR_TAGS), n => this._tags.has(n), MAX_DISCOVERED_TAGS - this._tags.size)
+      info.getAttributeString?.(XATTR_TAGS),
+      (n) => this._tags.has(n),
+      MAX_DISCOVERED_TAGS - this._tags.size,
+    )
     const cur = this._byUri.get(uri)
-    if (!names.length && !cur) return                        /* untagged, unindexed — the common case */
-    const curXattr = (cur ?? []).filter(e => e.src === 'xattr').map(e => e.tag)
+    if (!names.length && !cur) return /* untagged, unindexed — the common case */
+    const curXattr = (cur ?? []).filter((e) => e.src === 'xattr').map((e) => e.tag)
     if (sameNames(names, curXattr)) return
     this._ensureRegistry(names)
-    const keep = (cur ?? []).filter(e => e.src === 'index' && !names.includes(e.tag))
+    const keep = (cur ?? []).filter((e) => e.src === 'index' && !names.includes(e.tag))
     this._setIndex(uri, [...names.map((tag): Assignment => ({ tag, src: 'xattr' })), ...keep])
     this._queueChanged(uri)
   }
@@ -444,14 +507,15 @@ export class TagsService extends EventEmitter {
    * xattrs traveled with the files; only the index needs the new addresses. */
   rekeyPrefix(oldUri: string, newUri: string): void {
     this._ensure()
-    const pre = oldUri + '/'
-    const hits = [...this._byUri.keys()].filter(u => u === oldUri || u.startsWith(pre))
+    const pre = `${oldUri}/`
+    const hits = [...this._byUri.keys()].filter((u) => u === oldUri || u.startsWith(pre))
     if (!hits.length) return
     const changed: string[] = []
     this._tx(() => {
       for (const u of hits) {
         const next = newUri + u.slice(oldUri.length)
         this._sql('UPDATE OR REPLACE assignments SET uri = ? WHERE uri = ?', next, u)
+        // biome-ignore lint/style/noNonNullAssertion: `hits` holds only keys of this._byUri
         this._byUri.set(next, this._byUri.get(u)!)
         this._byUri.delete(u)
         changed.push(next)
@@ -464,8 +528,8 @@ export class TagsService extends EventEmitter {
    * xattr, so restoring it re-heals its tags on the next listing.) */
   dropPrefix(uri: string): void {
     this._ensure()
-    const pre = uri + '/'
-    const hits = [...this._byUri.keys()].filter(u => u === uri || u.startsWith(pre))
+    const pre = `${uri}/`
+    const hits = [...this._byUri.keys()].filter((u) => u === uri || u.startsWith(pre))
     if (!hits.length) return
     this._tx(() => {
       for (const u of hits) {
@@ -480,13 +544,22 @@ export class TagsService extends EventEmitter {
 
   getSetting(key: string, fallback: string): string {
     this._ensure()
-    try { return this._db?.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? fallback }
-    catch { return fallback }
+    try {
+      return (
+        this._db?.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? fallback
+      )
+    } catch {
+      return fallback
+    }
   }
 
   setSetting(key: string, value: string): void {
     this._ensure()
-    this._sql('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value)
+    this._sql(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      key,
+      value,
+    )
   }
 
   /* ---- internals ---- */
@@ -500,18 +573,29 @@ export class TagsService extends EventEmitter {
       } else {
         /* Unset the attribute (type INVALID removes an xattr); some backends
          * reject that — an empty value is equivalent for every consumer. */
-        try { file.setAttribute(XATTR_TAGS, Gio.FileAttributeType.INVALID, null, Gio.FileQueryInfoFlags.NONE, null) }
-        catch { file.setAttributeString(XATTR_TAGS, '', Gio.FileQueryInfoFlags.NONE, null) }
+        try {
+          file.setAttribute(
+            XATTR_TAGS,
+            Gio.FileAttributeType.INVALID,
+            null,
+            Gio.FileQueryInfoFlags.NONE,
+            null,
+          )
+        } catch {
+          file.setAttributeString(XATTR_TAGS, '', Gio.FileQueryInfoFlags.NONE, null)
+        }
       }
       return true
-    } catch { return false }
+    } catch {
+      return false
+    }
   }
 
   /* Rewrite a file's xattr from its current (already-updated) index entries —
    * used by tag rename/delete, where the assignment set is driven from the
    * registry side. Missing/refusing files degrade those rows to index-only. */
   _rewriteXattr(uri: string, entries: Assignment[]): void {
-    const names = entries.filter(e => e.src === 'xattr').map(e => e.tag)
+    const names = entries.filter((e) => e.src === 'xattr').map((e) => e.tag)
     const ok = this._writeXattr(fileForUri(uri), names)
     const next = ok ? entries : entries.map((e): Assignment => ({ ...e, src: 'index' }))
     this._setIndex(uri, next)
@@ -521,7 +605,14 @@ export class TagsService extends EventEmitter {
     this._tx(() => {
       this._sql('DELETE FROM assignments WHERE uri = ?', uri)
       entries.forEach((e, i) =>
-        this._sql('INSERT OR REPLACE INTO assignments (uri, tag, pos, src) VALUES (?, ?, ?, ?)', uri, e.tag, i, e.src))
+        this._sql(
+          'INSERT OR REPLACE INTO assignments (uri, tag, pos, src) VALUES (?, ?, ?, ?)',
+          uri,
+          e.tag,
+          i,
+          e.src,
+        ),
+      )
     })
     if (entries.length) this._byUri.set(uri, entries)
     else this._byUri.delete(uri)
@@ -529,20 +620,41 @@ export class TagsService extends EventEmitter {
 
   _sql(sql: string, ...args: any[]): void {
     if (!this._db) return
-    try { this._db.prepare(sql).run(...args) } catch { /* keep the in-memory state authoritative */ }
+    try {
+      this._db.prepare(sql).run(...args)
+    } catch {
+      /* keep the in-memory state authoritative */
+    }
   }
 
   _tx(fn: () => void): void {
-    if (!this._db) { fn(); return }
-    try { this._db.exec('BEGIN') } catch { fn(); return }
-    try { fn(); this._db.exec('COMMIT') }
-    catch { try { this._db.exec('ROLLBACK') } catch {} }
+    if (!this._db) {
+      fn()
+      return
+    }
+    try {
+      this._db.exec('BEGIN')
+    } catch {
+      fn()
+      return
+    }
+    try {
+      fn()
+      this._db.exec('COMMIT')
+    } catch {
+      try {
+        this._db.exec('ROLLBACK')
+      } catch {}
+    }
   }
 
   /* Coalesce heal-driven changes (one directory listing heals many entries)
    * into a single 'changed' on the idle loop. */
   _queueChanged(uri: string): void {
-    if (this._pendingChanged) { this._pendingChanged.add(uri); return }
+    if (this._pendingChanged) {
+      this._pendingChanged.add(uri)
+      return
+    }
     this._pendingChanged = new Set([uri])
     GLib.idleAdd(GLib.PRIORITY_DEFAULT_IDLE, () => {
       const uris = this._pendingChanged
@@ -560,7 +672,12 @@ export const tagsService = new TagsService()
 /* The list view's Tags column reads through the service (live after toggles,
  * hidden tags filtered), injected so core/columns.ts stays free of service
  * imports. */
-setTagsColumnFormatter(info => {
+setTagsColumnFormatter((info) => {
   const file = (info as any)._file
-  return file ? tagsService.tagObjectsOf(file.getUri()).map(t => t.name).join(', ') : ''
+  return file
+    ? tagsService
+        .tagObjectsOf(file.getUri())
+        .map((t) => t.name)
+        .join(', ')
+    : ''
 })

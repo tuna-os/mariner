@@ -7,17 +7,22 @@ export type ArchiveFormat = 'zip' | 'tar.xz' | 'tar.gz' | '7z'
  * the names, which ends option parsing (and, for 7z, @listfile parsing).
  * Without it, zip runs the command carried by a `-T` + `-TTcmd` pair of names,
  * zip `-m` and 7z `-sdel` delete the files being archived, and 7z `@list` adds
- * whatever paths the file `list` names. */
+ * whatever paths the file `list` names.
+ *
+ * A symbolic link is stored as a link. tar does that by default; zip needs `-y`
+ * and 7z needs `-snl`. Without them both store what the link points to, and for
+ * a link to a directory the whole directory, so a folder from someone else
+ * could pull the user's own files into the archive. */
 export function compressArgv(format: ArchiveFormat, out: string, names: string[]): string[] {
   switch (format) {
     case 'zip':
-      return ['zip', '-r', out, '--', ...names]
+      return ['zip', '-r', '-y', out, '--', ...names]
     case 'tar.gz':
       return ['tar', '-czf', out, '--', ...names]
     case 'tar.xz':
       return ['tar', '-cJf', out, '--', ...names]
     case '7z':
-      return ['7z', 'a', out, '--', ...names]
+      return ['7z', 'a', '-snl', out, '--', ...names]
   }
 }
 

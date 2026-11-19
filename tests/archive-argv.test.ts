@@ -20,6 +20,16 @@ describe('compressArgv', () => {
       for (const name of HOSTILE) assert.equal(head.includes(name), false)
     })
   }
+
+  /* zip and 7z follow symbolic links unless told otherwise, and then archive
+   * the target's content, a whole directory included. tar keeps links as links
+   * by default. */
+  test('zip and 7z are told to store a symbolic link as a link', () => {
+    const zip = compressArgv('zip', '/tmp/out', ['proj'])
+    assert.ok(zip.slice(0, zip.indexOf('--')).includes('-y'), JSON.stringify(zip))
+    const sevenZip = compressArgv('7z', '/tmp/out', ['proj'])
+    assert.ok(sevenZip.slice(0, sevenZip.indexOf('--')).includes('-snl'), JSON.stringify(sevenZip))
+  })
 })
 
 /* "Extract Here" unpacks each archive into a new folder named by this. The

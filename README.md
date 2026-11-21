@@ -244,14 +244,15 @@ download notifications and `gio open` (the `org.freedesktop.FileManager1`
 interface):
 
 ```sh
-xdg-mime default org.tunaos.mariner.desktop inode/directory
 mariner-set-default            # undo with: mariner-set-default --undo
 ```
 
 This sets the `inode/directory` MIME default and installs a per-user
 `org.freedesktop.FileManager1` service (no root, no conflict with an installed
 Nautilus). See [docs/default-file-manager.md](docs/default-file-manager.md) for
-what it does and how to set it up by hand.
+what it does and how to set it up by hand. The AUR package installs
+upstream's desktop file, `com.github.romgrk.mariner.desktop`, not this fork's
+`org.tunaos.mariner.desktop`, so use that ID if you run `xdg-mime` yourself.
 
 ### npm / pnpm (global)
 

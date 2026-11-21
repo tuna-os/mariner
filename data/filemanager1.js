@@ -69,18 +69,30 @@ function launch(args, startupId) {
   }
 }
 
+/* The interface takes URIs, and any peer on the session bus can call it,
+ * including a sandboxed app whose only way out is this name. `mariner` reads
+ * its first argument as an option when it is one (--uninstall-desktop-entry
+ * removes the user's launcher), so a string that is not a URI never reaches
+ * its command line. A URI starts with a scheme, and a scheme with a letter. */
+function onlyUris(values) {
+  return values.filter((value) => /^[a-z][a-z0-9+.-]*:/i.test(value))
+}
+
 const FileManager1 = {
   /* Open each URI as a folder. */
   ShowFolders(uris, startupId) {
-    if (uris.length) launch(uris, startupId)
+    const targets = onlyUris(uris)
+    if (targets.length) launch(targets, startupId)
   },
   /* Open each URI's parent folder and select the item within it. */
   ShowItems(uris, startupId) {
-    if (uris.length) launch(['--select', ...uris], startupId)
+    const targets = onlyUris(uris)
+    if (targets.length) launch(['--select', ...targets], startupId)
   },
   /* Reveal the items and open their Properties dialog. */
   ShowItemProperties(uris, startupId) {
-    if (uris.length) launch(['--properties', ...uris], startupId)
+    const targets = onlyUris(uris)
+    if (targets.length) launch(['--properties', ...targets], startupId)
   },
 }
 

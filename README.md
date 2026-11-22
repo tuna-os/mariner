@@ -122,10 +122,13 @@ music, video…) or by date.
 
 - Search: **Ctrl+F**
 
+See the [search guide](docs/features/SEARCH.md).
+
 ### Built-in disk usage analyzer
 
 Right-click any folder → **Analyze Disk Usage** to see what's eating your space as
 a colourful sunburst chart. Click a wedge to drill in. No separate app to install.
+See the [disk analyzer guide](docs/features/DISK-ANALYZER.md).
 
 <p align="center">
   <img src="docs/disk-usage.png" alt="Disk usage sunburst" width="820">
@@ -139,7 +142,7 @@ everything with that label from the sidebar — wherever the files actually live
 Tags are stored in the standard `user.xdg.tags` extended attribute, so they
 follow files when you copy them and stay compatible with KDE Dolphin. Not a
 tags person? A single switch in Preferences hides them everywhere — your tag
-data stays intact.
+data stays intact. See the [tags guide](docs/features/TAGS.md).
 
 The design follows the GNOME Design team's
 [tags whiteboard](https://gitlab.gnome.org/Teams/Design/whiteboards/-/work_items/332) —
@@ -202,7 +205,8 @@ Mariner is young, and a few things GNOME Files does haven't landed yet:
 - **Reordering or labelling bookmarks** — bookmarks can be added and removed,
   but reordering them or assigning custom labels isn't wired up yet.
 - **Custom actions** — user-defined commands in the file-view context menu are
-  planned but not implemented yet.
+  planned but not implemented yet (see the
+  [status note](docs/features/CUSTOM-ACTIONS.md)).
 - **Starred files** — there's no star/unstar action and no Starred view.
 - **Editing permissions** — the Properties dialog shows an item's permissions but
   can't yet change them (no read/write/execute toggles).

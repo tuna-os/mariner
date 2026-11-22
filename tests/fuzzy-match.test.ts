@@ -45,8 +45,10 @@ describe('fuzzyMatch', () => {
     const afterColon = fuzzyMatch('c', 'agent:continue')
     const insideWord = fuzzyMatch('c', 'agentxcontinue')
 
-    assert.deepEqual(afterColon?.positions, [6])
-    assert.deepEqual(insideWord?.positions, [6])
-    assert.ok(afterColon!.score > insideWord!.score)
+    assert.ok(afterColon)
+    assert.ok(insideWord)
+    assert.deepEqual(afterColon.positions, [6])
+    assert.deepEqual(insideWord.positions, [6])
+    assert.ok(afterColon.score > insideWord.score)
   })
 })

@@ -28,7 +28,10 @@ describe('UndoService', () => {
   test('pushing after undo discards redo history', () => {
     const service = new UndoService()
     const entry = (label: string) => ({
-      undo() {}, redo() {}, undoLabel: `Undo ${label}`, redoLabel: `Redo ${label}`,
+      undo() {},
+      redo() {},
+      undoLabel: `Undo ${label}`,
+      redoLabel: `Redo ${label}`,
     })
 
     service.push(entry('first'))

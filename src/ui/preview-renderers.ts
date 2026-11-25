@@ -5,6 +5,7 @@ import Gdk from 'gi:Gdk-4.0'
 import Gtk from 'gi:Gtk-4.0'
 import { displayName, formatModified, formatSize, formatType, isDirectory } from '../core/format.ts'
 import { escapeMarkup } from '../core/markup.ts'
+import { MAX_RICH_BYTES, renderRich, richKind } from '../core/rich-text.ts'
 import type { GFile, GFileInfo } from '../core/types.ts'
 
 /* Per-content-type preview builders for Quick Look. Each returns a widget
@@ -38,6 +39,8 @@ export function renderPreview(info: GFileInfo, file: GFile): unknown {
   if (!isDirectory(info) && ct.startsWith('image/')) return imagePreview(file)
   if (!isDirectory(info) && (ct.startsWith('video/') || ct.startsWith('audio/')))
     return mediaPreview(file)
+  const rich = !isDirectory(info) && path ? richKind(ct, path) : null
+  if (rich && path) return richPreview(path, rich)
   if (!isDirectory(info) && path && isTextType(ct)) return textPreview(path)
   return metadataCard(info, file)
 }
@@ -60,6 +63,92 @@ function mediaPreview(file: GFile): unknown {
   video.setHexpand(true)
   video.setVexpand(true)
   return video
+}
+
+/* Links open only on an explicit click, and only the schemes toPango emitted
+ * (http, https, mailto). Returning true stops GTK's default handler. */
+function openLink(uri: string): boolean {
+  if (/^(https?:\/\/|mailto:)/i.test(uri)) {
+    try {
+      Gtk.showUri(null, uri, Gdk.CURRENT_TIME)
+    } catch {
+      /* no handler */
+    }
+  }
+  return true
+}
+
+/* Rendered Markdown/HTML with a "Source" toggle for the raw text. The file is
+ * read once (bounded); nothing is fetched. On any failure or oversize input the
+ * view falls back to raw text with an explicit notice. */
+function richPreview(path: string, kind: 'markdown' | 'html'): unknown {
+  const raw = textPreview(path)
+  const label = new Gtk.Label({
+    useMarkup: true,
+    wrap: true,
+    selectable: true,
+    xalign: 0,
+    yalign: 0,
+    hexpand: true,
+    vexpand: true,
+    label: 'Loading…',
+  })
+  label.setMarginStart(16)
+  label.setMarginEnd(16)
+  label.setMarginTop(12)
+  label.setMarginBottom(12)
+  label.on('activate-link', (uri: string) => openLink(String(uri)))
+  const rendered = new Gtk.ScrolledWindow({ child: label, hexpand: true, vexpand: true })
+
+  const stack = new Gtk.Stack({ hexpand: true, vexpand: true })
+  stack.addNamed(rendered, 'rendered')
+  stack.addNamed(raw, 'raw')
+  const toggle = new Gtk.ToggleButton({
+    label: 'Source',
+    halign: Gtk.Align.END,
+    valign: Gtk.Align.START,
+  })
+  toggle.setMargin?.(6)
+  toggle.on('toggled', () => stack.setVisibleChildName(toggle.getActive() ? 'raw' : 'rendered'))
+  const overlay = new Gtk.Overlay({ child: stack })
+  overlay.addOverlay(toggle)
+
+  const fallback = (why: string) => {
+    GLib.idleAdd(GLib.PRIORITY_DEFAULT, () => {
+      label.setUseMarkup(false)
+      label.setLabel(why)
+      stack.setVisibleChildName('raw')
+      toggle.setActive(true)
+      return false
+    })
+  }
+  readBounded(path, MAX_RICH_BYTES)
+    .then(({ text, truncated }) => {
+      let markup = ''
+      let partial = truncated
+      try {
+        const r = renderRich(kind, text)
+        markup = r.markup
+        partial = partial || r.truncated
+      } catch {
+        return fallback('This file could not be rendered; showing raw text.')
+      }
+      if (!markup.trim()) return fallback('Nothing to render; showing raw text.')
+      GLib.idleAdd(GLib.PRIORITY_DEFAULT, () => {
+        try {
+          label.setLabel(
+            markup + (partial ? '\n\n<i>… (preview truncated — use Source for raw text)</i>' : ''),
+          )
+        } catch {
+          label.setUseMarkup(false)
+          label.setLabel('This file could not be rendered; showing raw text.')
+          stack.setVisibleChildName('raw')
+        }
+        return false
+      })
+    })
+    .catch(() => fallback('This file could not be read.'))
+  return overlay
 }
 
 function textPreview(path: string): unknown {
@@ -92,14 +181,17 @@ function textPreview(path: string): unknown {
   return scroller
 }
 
-async function readBounded(path: string): Promise<{ text: string; truncated: boolean }> {
+async function readBounded(
+  path: string,
+  max = MAX_TEXT_BYTES,
+): Promise<{ text: string; truncated: boolean }> {
   const fh = await open(path, 'r')
   try {
-    const buf = Buffer.alloc(MAX_TEXT_BYTES)
-    const { bytesRead } = await fh.read(buf, 0, MAX_TEXT_BYTES, 0)
+    const buf = Buffer.alloc(max)
+    const { bytesRead } = await fh.read(buf, 0, max, 0)
     return {
       text: buf.subarray(0, bytesRead).toString('utf8'),
-      truncated: bytesRead >= MAX_TEXT_BYTES,
+      truncated: bytesRead >= max,
     }
   } finally {
     await fh.close()
